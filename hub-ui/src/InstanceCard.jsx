@@ -1,22 +1,31 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Card,
-  Tag,
+  CardHeader,
+  CardContent,
   Typography,
+  Chip,
   Button,
-  Space,
-  Collapse,
-  message,
-  Popconfirm,
+  IconButton,
+  Stack,
+  Box,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
   Select,
-  Input,
-  InputNumber,
+  MenuItem,
+  TextField,
   Slider,
-  Form,
   List,
-  Empty,
-} from 'antd'
-import { ReloadOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons'
+  ListItem,
+  ListItemText,
+  Popover,
+} from '@mui/material'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import DeleteIcon from '@mui/icons-material/Delete'
+import RefreshIcon from '@mui/icons-material/Refresh'
+import AddIcon from '@mui/icons-material/Add'
 import {
   deleteInstance,
   rotateInstance,
@@ -28,17 +37,74 @@ import {
   listWebhookRequests,
   clearWebhookRequests,
 } from './api'
-
-const { Text, Paragraph } = Typography
+import { toast } from './toast'
 
 const STATE_COLOR = {
-  running: 'green',
+  running: 'success',
   stopped: 'default',
   exited: 'default',
-  created: 'gold',
+  created: 'warning',
 }
 
 const PATH_SUFFIX = { 'rest-api': '/items', 'mcp-server': '/mcp' }
+
+const KIND_LABEL = {
+  'rest-api': 'REST API',
+  'mcp-server': 'MCP Server',
+  'mock-api': 'Mock API',
+  'webhook-receiver': 'Webhook Receiver',
+  'chaos-api': 'Rate Limit / Chaos API',
+}
+
+function Code({ text, sx }) {
+  const copy = () => {
+    navigator.clipboard.writeText(text)
+    toast.success('copied')
+  }
+  return (
+    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.3, verticalAlign: 'middle', ...sx }}>
+      <Box
+        component="code"
+        sx={{
+          bgcolor: '#f0f0f0',
+          px: 0.8,
+          py: 0.2,
+          borderRadius: 1,
+          fontFamily: 'monospace',
+          fontSize: 12,
+          wordBreak: 'break-all',
+        }}
+      >
+        {text}
+      </Box>
+      <IconButton size="small" onClick={copy} sx={{ p: 0.3 }}>
+        <ContentCopyIcon sx={{ fontSize: 14 }} />
+      </IconButton>
+    </Box>
+  )
+}
+
+function Snippet({ text }) {
+  return (
+    <Box
+      component="pre"
+      sx={{ bgcolor: '#f5f5f5', p: 1, borderRadius: 1, overflowX: 'auto', fontSize: 12, m: 0 }}
+    >
+      {text}
+    </Box>
+  )
+}
+
+function Field({ label, children }) {
+  return (
+    <Typography variant="body2" sx={{ mb: 0.5 }}>
+      <Typography component="span" variant="body2" color="text.secondary">
+        {label}:
+      </Typography>{' '}
+      {children}
+    </Typography>
+  )
+}
 
 function buildSnippet(instance) {
   const { kind, auth, url } = instance
@@ -67,82 +133,81 @@ function AuthDetails({ instance }) {
   if (!auth) return null
 
   return (
-    <div>
+    <Box>
       {auth.mode === 'apikey' && (
-        <Paragraph style={{ marginBottom: 4 }}>
-          <Text type="secondary">Header:</Text> <Text code>{auth.header}</Text>
-          <br />
-          <Text type="secondary">Key:</Text>{' '}
-          <Text code copyable={{ text: auth.api_key }}>
-            {auth.api_key}
-          </Text>
-        </Paragraph>
+        <Box sx={{ mb: 1 }}>
+          <Field label="Header">
+            <Code text={auth.header} />
+          </Field>
+          <Field label="Key">
+            <Code text={auth.api_key} />
+          </Field>
+        </Box>
       )}
       {auth.mode === 'basic' && (
-        <Paragraph style={{ marginBottom: 4 }}>
-          <Text type="secondary">Username:</Text> <Text code copyable>{auth.username}</Text>
-          <br />
-          <Text type="secondary">Password:</Text>{' '}
-          <Text code copyable={{ text: auth.password }}>
-            {auth.password}
-          </Text>
-        </Paragraph>
+        <Box sx={{ mb: 1 }}>
+          <Field label="Username">
+            <Code text={auth.username} />
+          </Field>
+          <Field label="Password">
+            <Code text={auth.password} />
+          </Field>
+        </Box>
       )}
       {auth.mode === 'jwt' && (
-        <Paragraph style={{ marginBottom: 4 }}>
-          <Text type="secondary">Token (self-contained, verified locally, no external calls):</Text>
-          <br />
-          <Text code copyable={{ text: auth.token }} style={{ wordBreak: 'break-all', fontSize: 11 }}>
-            {auth.token}
-          </Text>
-          <br />
-          <Text type="secondary">Get a fresh one anytime:</Text> <Text code copyable>{auth.debug_token_url}</Text>
-        </Paragraph>
+        <Box sx={{ mb: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            Token (self-contained, verified locally, no external calls):
+          </Typography>
+          <Code text={auth.token} sx={{ display: 'block', mb: 0.5 }} />
+          <Field label="Get a fresh one anytime">
+            <Code text={auth.debug_token_url} />
+          </Field>
+        </Box>
       )}
       {auth.mode === 'session' && (
-        <Paragraph style={{ marginBottom: 4 }}>
-          <Text type="secondary">Login:</Text> <Text code copyable>{auth.login_url}</Text>
-          <br />
-          <Text type="secondary">Username:</Text> <Text code copyable>{auth.username}</Text>
-          <br />
-          <Text type="secondary">Password:</Text>{' '}
-          <Text code copyable={{ text: auth.password }}>
-            {auth.password}
-          </Text>
-          <br />
-          <Text type="secondary">Logout:</Text> <Text code copyable>{auth.logout_url}</Text>
-        </Paragraph>
+        <Box sx={{ mb: 1 }}>
+          <Field label="Login">
+            <Code text={auth.login_url} />
+          </Field>
+          <Field label="Username">
+            <Code text={auth.username} />
+          </Field>
+          <Field label="Password">
+            <Code text={auth.password} />
+          </Field>
+          <Field label="Logout">
+            <Code text={auth.logout_url} />
+          </Field>
+        </Box>
       )}
       {auth.mode === 'oauth' && (
-        <Paragraph style={{ marginBottom: 4 }}>
-          <Text type="secondary">Token endpoint:</Text> <Text code copyable>{auth.token_endpoint}</Text>
-          <br />
-          <Text type="secondary">Client ID:</Text> <Text code copyable>{auth.client_id}</Text>
-          <br />
-          <Text type="secondary">Client secret:</Text>{' '}
-          <Text code copyable={{ text: auth.client_secret }}>
-            {auth.client_secret}
-          </Text>
-        </Paragraph>
+        <Box sx={{ mb: 1 }}>
+          <Field label="Token endpoint">
+            <Code text={auth.token_endpoint} />
+          </Field>
+          <Field label="Client ID">
+            <Code text={auth.client_id} />
+          </Field>
+          <Field label="Client secret">
+            <Code text={auth.client_secret} />
+          </Field>
+        </Box>
       )}
       {instance.url && (
-        <Paragraph style={{ marginBottom: 4 }}>
-          <Text type="secondary">URL:</Text>{' '}
-          <Text code copyable>
-            {instance.url}
-            {PATH_SUFFIX[instance.kind] || ''}
-          </Text>
-        </Paragraph>
+        <Field label="URL">
+          <Code text={`${instance.url}${PATH_SUFFIX[instance.kind] || ''}`} />
+        </Field>
       )}
       {buildSnippet(instance) && (
-        <Paragraph style={{ marginBottom: 4 }}>
-          <Text type="secondary">Try it:</Text>
-          <pre style={{ background: '#f5f5f5', padding: 8, borderRadius: 4, overflowX: 'auto', fontSize: 12 }}>
-            {buildSnippet(instance)}
-          </pre>
-        </Paragraph>
+        <Box sx={{ mt: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            Try it:
+          </Typography>
+          <Snippet text={buildSnippet(instance)} />
+        </Box>
       )}
-    </div>
+    </Box>
   )
 }
 
@@ -150,135 +215,161 @@ function OpenApiDetails({ instance }) {
   const openapi = instance.openapi
   if (!openapi) return null
   return (
-    <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #f0f0f0' }}>
-      <Text strong>OpenAPI ({openapi.version})</Text>
-      <Paragraph style={{ marginBottom: 4, marginTop: 4 }}>
-        <Text type="secondary">Spec:</Text> <Text code copyable>{openapi.spec_url}</Text>
-        <br />
-        <Text type="secondary">Swagger UI:</Text> <Text code copyable>{openapi.docs_url}</Text>
-        <br />
-        <Text type="secondary">ReDoc:</Text> <Text code copyable>{openapi.redoc_url}</Text>
-      </Paragraph>
+    <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid #f0f0f0' }}>
+      <Typography variant="subtitle2">OpenAPI ({openapi.version})</Typography>
+      <Field label="Spec">
+        <Code text={openapi.spec_url} />
+      </Field>
+      <Field label="Swagger UI">
+        <Code text={openapi.docs_url} />
+      </Field>
+      <Field label="ReDoc">
+        <Code text={openapi.redoc_url} />
+      </Field>
       {openapi.protected ? (
-        <Paragraph style={{ marginBottom: 4 }}>
-          <Tag color="orange">spec protected</Tag>
-          <br />
-          <Text type="secondary">Header:</Text> <Text code>{openapi.auth.header}</Text>
-          <br />
-          <Text type="secondary">Token:</Text>{' '}
-          <Text code copyable={{ text: openapi.auth.token }}>
-            {openapi.auth.token}
-          </Text>
-          <br />
-          <pre style={{ background: '#f5f5f5', padding: 8, borderRadius: 4, overflowX: 'auto', fontSize: 12 }}>
-            {`curl -H "${openapi.auth.header}: ${openapi.auth.token}" ${openapi.spec_url}`}
-          </pre>
-        </Paragraph>
+        <Box sx={{ mt: 0.5 }}>
+          <Chip size="small" color="warning" label="spec protected" sx={{ mb: 0.5 }} />
+          <Field label="Header">
+            <Code text={openapi.auth.header} />
+          </Field>
+          <Field label="Token">
+            <Code text={openapi.auth.token} />
+          </Field>
+          <Snippet text={`curl -H "${openapi.auth.header}: ${openapi.auth.token}" ${openapi.spec_url}`} />
+        </Box>
       ) : (
-        <Tag>spec open</Tag>
+        <Chip size="small" label="spec open" sx={{ mt: 0.5 }} />
       )}
-    </div>
+    </Box>
   )
 }
 
 function ChaosPanel({ instance, onChanged }) {
-  const [form] = Form.useForm()
-  const [saving, setSaving] = useState(false)
   const chaos = instance.chaos
-  const mode = Form.useWatch('mode', form) ?? chaos?.mode ?? 'normal'
+  const [mode, setMode] = useState(chaos?.mode ?? 'normal')
+  const [rateLimit, setRateLimit] = useState(chaos?.rate_limit ?? { limit: 5, window_seconds: 10 })
+  const [chaosCfg, setChaosCfg] = useState(
+    chaos?.chaos ?? { status_code: 200, body: { ok: true }, latency_ms: 0, failure_rate: 0 }
+  )
+  const [bodyText, setBodyText] = useState(JSON.stringify(chaosCfg.body))
+  const [saving, setSaving] = useState(false)
 
   const save = async () => {
+    let body
     try {
-      const values = await form.validateFields()
-      setSaving(true)
-      await setChaosConfig(instance.id, values)
+      body = JSON.parse(bodyText)
+    } catch {
+      toast.error('response body must be valid JSON')
+      return
+    }
+    setSaving(true)
+    try {
+      await setChaosConfig(instance.id, { mode, rate_limit: rateLimit, chaos: { ...chaosCfg, body } })
       await onChanged()
-      message.success('config updated')
+      toast.success('config updated')
     } catch (err) {
-      if (err?.errorFields) return
-      message.error(err.message)
+      toast.error(err.message)
     } finally {
       setSaving(false)
     }
   }
 
-  if (!chaos) return <Text type="secondary">loading config…</Text>
+  if (!chaos) return <Typography color="text.secondary">loading config…</Typography>
 
   return (
-    <Form
-      form={form}
-      layout="vertical"
-      size="small"
-      initialValues={{
-        mode: chaos.mode,
-        rate_limit: chaos.rate_limit,
-        chaos: chaos.chaos,
-      }}
-    >
-      <Paragraph type="secondary" style={{ marginBottom: 8 }}>
-        Test endpoint: <Text code copyable>{instance.url}/test</Text>
-      </Paragraph>
-      <Form.Item name="mode" label="Mode">
-        <Select
-          options={[
-            { value: 'normal', label: 'Normal (always 200)' },
-            { value: 'rate_limit', label: 'Rate limit' },
-            { value: 'chaos', label: 'Chaos (custom status/body/latency)' },
-          ]}
-        />
-      </Form.Item>
+    <Stack spacing={2}>
+      <Typography variant="body2" color="text.secondary">
+        Test endpoint: <Code text={`${instance.url}/test`} />
+      </Typography>
+
+      <Select size="small" value={mode} onChange={(e) => setMode(e.target.value)}>
+        <MenuItem value="normal">Normal (always 200)</MenuItem>
+        <MenuItem value="rate_limit">Rate limit</MenuItem>
+        <MenuItem value="chaos">Chaos (custom status/body/latency)</MenuItem>
+      </Select>
 
       {mode === 'rate_limit' && (
-        <Space>
-          <Form.Item name={['rate_limit', 'limit']} label="Requests allowed">
-            <InputNumber min={1} />
-          </Form.Item>
-          <Form.Item name={['rate_limit', 'window_seconds']} label="Per (seconds)">
-            <InputNumber min={1} />
-          </Form.Item>
-        </Space>
+        <Stack direction="row" spacing={2}>
+          <TextField
+            size="small"
+            label="Requests allowed"
+            type="number"
+            value={rateLimit.limit}
+            onChange={(e) => setRateLimit((r) => ({ ...r, limit: Number(e.target.value) }))}
+          />
+          <TextField
+            size="small"
+            label="Per (seconds)"
+            type="number"
+            value={rateLimit.window_seconds}
+            onChange={(e) => setRateLimit((r) => ({ ...r, window_seconds: Number(e.target.value) }))}
+          />
+        </Stack>
       )}
 
       {mode === 'chaos' && (
         <>
-          <Space>
-            <Form.Item name={['chaos', 'status_code']} label="Status code">
-              <InputNumber min={100} max={599} />
-            </Form.Item>
-            <Form.Item name={['chaos', 'latency_ms']} label="Latency (ms)">
-              <InputNumber min={0} />
-            </Form.Item>
-          </Space>
-          <Form.Item name={['chaos', 'body']} label="Response body (JSON)" getValueProps={(v) => ({ value: typeof v === 'string' ? v : JSON.stringify(v) })} normalize={(v) => { try { return JSON.parse(v) } catch { return v } }}>
-            <Input.TextArea rows={2} />
-          </Form.Item>
-          <Form.Item
-            name={['chaos', 'failure_rate']}
-            label="Random failure rate"
-            tooltip="Chance (0-1) of returning a random 5xx instead of the configured response"
-          >
-            <Slider min={0} max={1} step={0.05} />
-          </Form.Item>
+          <Stack direction="row" spacing={2}>
+            <TextField
+              size="small"
+              label="Status code"
+              type="number"
+              value={chaosCfg.status_code}
+              onChange={(e) => setChaosCfg((c) => ({ ...c, status_code: Number(e.target.value) }))}
+            />
+            <TextField
+              size="small"
+              label="Latency (ms)"
+              type="number"
+              value={chaosCfg.latency_ms}
+              onChange={(e) => setChaosCfg((c) => ({ ...c, latency_ms: Number(e.target.value) }))}
+            />
+          </Stack>
+          <TextField
+            size="small"
+            label="Response body (JSON)"
+            multiline
+            minRows={2}
+            value={bodyText}
+            onChange={(e) => setBodyText(e.target.value)}
+          />
+          <Box>
+            <Typography variant="body2" color="text.secondary">
+              Random failure rate: {chaosCfg.failure_rate}
+            </Typography>
+            <Slider
+              size="small"
+              min={0}
+              max={1}
+              step={0.05}
+              value={chaosCfg.failure_rate}
+              onChange={(_, v) => setChaosCfg((c) => ({ ...c, failure_rate: v }))}
+            />
+          </Box>
         </>
       )}
 
-      <Button size="small" type="primary" loading={saving} onClick={save}>
+      <Button size="small" variant="contained" disabled={saving} onClick={save} sx={{ alignSelf: 'flex-start' }}>
         Save
       </Button>
-    </Form>
+    </Stack>
   )
 }
 
 function MockRoutesPanel({ instanceId, active, onChanged }) {
   const [routes, setRoutes] = useState([])
-  const [form] = Form.useForm()
+  const [method, setMethod] = useState('*')
+  const [path, setPath] = useState('*')
+  const [statusCode, setStatusCode] = useState(200)
+  const [responseBody, setResponseBody] = useState('{"ok": true}')
+  const [requiredFields, setRequiredFields] = useState('')
   const [busy, setBusy] = useState(false)
 
   const load = async () => {
     try {
       setRoutes(await listRoutes(instanceId))
     } catch (err) {
-      message.error(err.message)
+      toast.error(err.message)
     }
   }
 
@@ -288,33 +379,31 @@ function MockRoutesPanel({ instanceId, active, onChanged }) {
   }, [active])
 
   const addRoute = async () => {
+    let body
     try {
-      const values = await form.validateFields()
-      setBusy(true)
-      let response_body
-      try {
-        response_body = JSON.parse(values.response_body)
-      } catch {
-        message.error('response body must be valid JSON')
-        setBusy(false)
-        return
-      }
-      const required_fields = values.required_fields
-        ? values.required_fields.split(',').map((s) => s.trim()).filter(Boolean)
-        : []
+      body = JSON.parse(responseBody)
+    } catch {
+      toast.error('response body must be valid JSON')
+      return
+    }
+    setBusy(true)
+    try {
       await createRoute(instanceId, {
-        method: values.method,
-        path: values.path,
-        status_code: values.status_code,
-        response_body,
-        required_fields,
+        method,
+        path,
+        status_code: statusCode,
+        response_body: body,
+        required_fields: requiredFields
+          ? requiredFields.split(',').map((s) => s.trim()).filter(Boolean)
+          : [],
       })
-      form.resetFields()
+      setPath('*')
+      setResponseBody('{"ok": true}')
+      setRequiredFields('')
       await load()
       await onChanged()
     } catch (err) {
-      if (err?.errorFields) return
-      message.error(err.message)
+      toast.error(err.message)
     } finally {
       setBusy(false)
     }
@@ -327,53 +416,83 @@ function MockRoutesPanel({ instanceId, active, onChanged }) {
   }
 
   return (
-    <div>
-      <List
-        size="small"
-        dataSource={routes}
-        locale={{ emptyText: 'No routes yet -- add one below.' }}
-        renderItem={(r) => (
-          <List.Item
-            actions={[
-              <Button key="del" size="small" danger type="text" icon={<DeleteOutlined />} onClick={() => remove(r.id)} />,
-            ]}
-          >
-            <Text code>
-              {r.method} {r.path}
-            </Text>{' '}
-            <Tag>{r.status_code}</Tag>
-          </List.Item>
-        )}
-      />
-      <Form form={form} layout="vertical" size="small" style={{ marginTop: 12 }} initialValues={{ method: '*', path: '*', status_code: 200, response_body: '{"ok": true}' }}>
-        <Space wrap>
-          <Form.Item name="method" label="Method" style={{ marginBottom: 8 }}>
-            <Select style={{ width: 100 }}>
-              {['*', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => (
-                <Select.Option key={m} value={m}>
-                  {m}
-                </Select.Option>
-              ))}
-            </Select>
-          </Form.Item>
-          <Form.Item name="path" label="Path (or *)" style={{ marginBottom: 8 }}>
-            <Input style={{ width: 160 }} placeholder="/users or *" />
-          </Form.Item>
-          <Form.Item name="status_code" label="Status" style={{ marginBottom: 8 }}>
-            <InputNumber min={100} max={599} style={{ width: 90 }} />
-          </Form.Item>
-        </Space>
-        <Form.Item name="response_body" label="Response body (JSON, supports {{request.body.x}}, {{uuid}}, {{now}})">
-          <Input.TextArea rows={3} />
-        </Form.Item>
-        <Form.Item name="required_fields" label="Required request body fields (comma-separated, optional)">
-          <Input placeholder="name, email" />
-        </Form.Item>
-        <Button size="small" type="primary" icon={<PlusOutlined />} loading={busy} onClick={addRoute}>
+    <Box>
+      {routes.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          No routes yet -- add one below.
+        </Typography>
+      ) : (
+        <List dense disablePadding>
+          {routes.map((r) => (
+            <ListItem
+              key={r.id}
+              disableGutters
+              secondaryAction={
+                <IconButton size="small" onClick={() => remove(r.id)}>
+                  <DeleteIcon fontSize="small" color="error" />
+                </IconButton>
+              }
+            >
+              <ListItemText
+                primary={
+                  <>
+                    <Box component="code" sx={{ fontFamily: 'monospace', fontSize: 13 }}>
+                      {r.method} {r.path}
+                    </Box>{' '}
+                    <Chip size="small" label={r.status_code} />
+                  </>
+                }
+              />
+            </ListItem>
+          ))}
+        </List>
+      )}
+
+      <Stack spacing={1.5} sx={{ mt: 1.5 }}>
+        <Stack direction="row" spacing={1} flexWrap="wrap">
+          <Select size="small" value={method} onChange={(e) => setMethod(e.target.value)} sx={{ minWidth: 90 }}>
+            {['*', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => (
+              <MenuItem key={m} value={m}>
+                {m}
+              </MenuItem>
+            ))}
+          </Select>
+          <TextField
+            size="small"
+            label="Path (or *)"
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            sx={{ width: 160 }}
+          />
+          <TextField
+            size="small"
+            label="Status"
+            type="number"
+            value={statusCode}
+            onChange={(e) => setStatusCode(Number(e.target.value))}
+            sx={{ width: 90 }}
+          />
+        </Stack>
+        <TextField
+          size="small"
+          label="Response body (JSON, supports {{request.body.x}}, {{uuid}}, {{now}})"
+          multiline
+          minRows={2}
+          value={responseBody}
+          onChange={(e) => setResponseBody(e.target.value)}
+        />
+        <TextField
+          size="small"
+          label="Required request body fields (comma-separated, optional)"
+          placeholder="name, email"
+          value={requiredFields}
+          onChange={(e) => setRequiredFields(e.target.value)}
+        />
+        <Button size="small" variant="contained" startIcon={<AddIcon />} disabled={busy} onClick={addRoute} sx={{ alignSelf: 'flex-start' }}>
           Add route
         </Button>
-      </Form>
-    </div>
+      </Stack>
+    </Box>
   )
 }
 
@@ -384,7 +503,7 @@ function WebhookRequestsPanel({ instanceId, active }) {
     try {
       setRequests(await listWebhookRequests(instanceId))
     } catch (err) {
-      message.error(err.message)
+      toast.error(err.message)
     }
   }
 
@@ -402,34 +521,32 @@ function WebhookRequestsPanel({ instanceId, active }) {
   }
 
   return (
-    <div>
-      <Button size="small" onClick={clear} style={{ marginBottom: 8 }}>
+    <Box>
+      <Button size="small" onClick={clear} sx={{ mb: 1 }}>
         Clear
       </Button>
       {requests.length === 0 ? (
-        <Empty description="No requests received yet" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Typography variant="body2" color="text.secondary">
+          No requests received yet
+        </Typography>
       ) : (
-        <List
-          size="small"
-          dataSource={[...requests].reverse()}
-          renderItem={(r) => (
-            <List.Item>
-              <div style={{ width: '100%' }}>
-                <Text code>
-                  {r.method} {r.path}
-                </Text>{' '}
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  {r.received_at}
-                </Text>
-                <pre style={{ background: '#f5f5f5', padding: 6, borderRadius: 4, fontSize: 11, margin: '4px 0 0' }}>
-                  {JSON.stringify(r.body_json ?? r.body_text, null, 2)}
-                </pre>
-              </div>
-            </List.Item>
-          )}
-        />
+        <List dense disablePadding>
+          {[...requests].reverse().map((r, i) => (
+            <ListItem key={i} disableGutters sx={{ display: 'block' }}>
+              <Box component="code" sx={{ fontFamily: 'monospace', fontSize: 13 }}>
+                {r.method} {r.path}
+              </Box>{' '}
+              <Typography component="span" variant="caption" color="text.secondary">
+                {r.received_at}
+              </Typography>
+              <Box component="pre" sx={{ bgcolor: '#f5f5f5', p: 0.75, borderRadius: 1, fontSize: 11, m: '4px 0 0' }}>
+                {JSON.stringify(r.body_json ?? r.body_text, null, 2)}
+              </Box>
+            </ListItem>
+          ))}
+        </List>
       )}
-    </div>
+    </Box>
   )
 }
 
@@ -449,47 +566,78 @@ function LogsPanel({ id, active }) {
   }, [lines])
 
   return (
-    <div
+    <Box
       ref={boxRef}
-      style={{
-        background: '#111',
+      sx={{
+        bgcolor: '#111',
         color: '#0f0',
         fontFamily: 'monospace',
         fontSize: 12,
-        padding: 8,
+        p: 1,
         height: 200,
         overflowY: 'auto',
-        borderRadius: 4,
+        borderRadius: 1,
         whiteSpace: 'pre-wrap',
       }}
     >
       {lines.length === 0 ? 'waiting for log output…' : lines.join('')}
-    </div>
+    </Box>
   )
 }
 
-const KIND_LABEL = {
-  'rest-api': 'REST API',
-  'mcp-server': 'MCP Server',
-  'mock-api': 'Mock API',
-  'webhook-receiver': 'Webhook Receiver',
-  'chaos-api': 'Rate Limit / Chaos API',
+function DeleteConfirmButton({ onConfirm, loading }) {
+  const [anchorEl, setAnchorEl] = useState(null)
+  const open = Boolean(anchorEl)
+
+  const confirm = () => {
+    setAnchorEl(null)
+    onConfirm()
+  }
+
+  return (
+    <>
+      <IconButton size="small" color="error" onClick={(e) => setAnchorEl(e.currentTarget)} disabled={loading}>
+        <DeleteIcon fontSize="small" />
+      </IconButton>
+      <Popover
+        open={open}
+        anchorEl={anchorEl}
+        onClose={() => setAnchorEl(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Box sx={{ p: 2 }}>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            Stop and remove this instance?
+          </Typography>
+          <Stack direction="row" spacing={1} justifyContent="flex-end">
+            <Button size="small" onClick={() => setAnchorEl(null)}>
+              Cancel
+            </Button>
+            <Button size="small" color="error" variant="contained" onClick={confirm}>
+              Delete
+            </Button>
+          </Stack>
+        </Box>
+      </Popover>
+    </>
+  )
 }
 
 export default function InstanceCard({ instance, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [openPanel, setOpenPanel] = useState(null)
 
-  const canRotate = ['apikey', 'basic', 'jwt', 'session', 'oauth'].includes(instance.auth?.mode) || instance.openapi?.protected
+  const canRotate =
+    ['apikey', 'basic', 'jwt', 'session', 'oauth'].includes(instance.auth?.mode) || instance.openapi?.protected
 
   const rotate = async () => {
     setBusy(true)
     try {
       await rotateInstance(instance.id)
       await onChanged()
-      message.success('credentials rotated')
+      toast.success('credentials rotated')
     } catch (err) {
-      message.error(err.message)
+      toast.error(err.message)
     } finally {
       setBusy(false)
     }
@@ -501,66 +649,73 @@ export default function InstanceCard({ instance, onChanged }) {
       await deleteInstance(instance.id)
       await onChanged()
     } catch (err) {
-      message.error(err.message)
+      toast.error(err.message)
       setBusy(false)
     }
   }
 
-  const items = []
+  const panels = []
   if (instance.kind === 'chaos-api') {
-    items.push({ key: 'chaos', label: 'Configure', children: <ChaosPanel instance={instance} onChanged={onChanged} /> })
+    panels.push({ key: 'chaos', label: 'Configure', content: <ChaosPanel instance={instance} onChanged={onChanged} /> })
   }
   if (instance.kind === 'mock-api') {
-    items.push({
+    panels.push({
       key: 'routes',
       label: `Routes (${instance.mock_routes?.length ?? 0})`,
-      children: <MockRoutesPanel instanceId={instance.id} active={openPanel === 'routes'} onChanged={onChanged} />,
+      content: <MockRoutesPanel instanceId={instance.id} active={openPanel === 'routes'} onChanged={onChanged} />,
     })
   }
   if (instance.kind === 'webhook-receiver') {
-    items.push({
+    panels.push({
       key: 'requests',
       label: 'Received requests',
-      children: <WebhookRequestsPanel instanceId={instance.id} active={openPanel === 'requests'} />,
+      content: <WebhookRequestsPanel instanceId={instance.id} active={openPanel === 'requests'} />,
     })
   }
-  items.push({ key: 'logs', label: 'Logs', children: <LogsPanel id={instance.id} active={openPanel === 'logs'} /> })
+  panels.push({ key: 'logs', label: 'Logs', content: <LogsPanel id={instance.id} active={openPanel === 'logs'} /> })
 
   return (
-    <Card
-      title={instance.name}
-      extra={
-        <Popconfirm title="Stop and remove this instance?" onConfirm={remove}>
-          <Button size="small" danger icon={<DeleteOutlined />} loading={busy} />
-        </Popconfirm>
-      }
-      style={{ marginBottom: 16 }}
-    >
-      <Space orientation="vertical" style={{ width: '100%' }}>
-        <div>
-          <Tag color={STATE_COLOR[instance.state] || 'default'}>{instance.state}</Tag>
-          <Tag color="blue">{KIND_LABEL[instance.kind] || instance.kind}</Tag>
-          {instance.auth && <Tag>{instance.auth.mode}</Tag>}
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {instance.id}
-          </Text>
-        </div>
+    <Card variant="outlined">
+      <CardHeader
+        title={instance.name}
+        titleTypographyProps={{ variant: 'subtitle1', fontWeight: 600 }}
+        action={<DeleteConfirmButton onConfirm={remove} loading={busy} />}
+      />
+      <CardContent sx={{ pt: 0 }}>
+        <Stack spacing={1.5}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Chip size="small" color={STATE_COLOR[instance.state] || 'default'} label={instance.state} />
+            <Chip size="small" color="info" label={KIND_LABEL[instance.kind] || instance.kind} />
+            {instance.auth && <Chip size="small" label={instance.auth.mode} />}
+            <Typography variant="caption" color="text.secondary">
+              {instance.id}
+            </Typography>
+          </Stack>
 
-        <AuthDetails instance={instance} />
-        <OpenApiDetails instance={instance} />
+          <AuthDetails instance={instance} />
+          <OpenApiDetails instance={instance} />
 
-        {canRotate && (
-          <Button size="small" icon={<ReloadOutlined />} onClick={rotate} loading={busy}>
-            Rotate credentials
-          </Button>
-        )}
+          {canRotate && (
+            <Button size="small" startIcon={<RefreshIcon />} onClick={rotate} disabled={busy} sx={{ alignSelf: 'flex-start' }}>
+              Rotate credentials
+            </Button>
+          )}
 
-        <Collapse
-          size="small"
-          onChange={(keys) => setOpenPanel(keys[0] || null)}
-          items={items}
-        />
-      </Space>
+          {panels.map((p) => (
+            <Accordion
+              key={p.key}
+              disableGutters
+              expanded={openPanel === p.key}
+              onChange={(_, isExpanded) => setOpenPanel(isExpanded ? p.key : null)}
+            >
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="body2">{p.label}</Typography>
+              </AccordionSummary>
+              <AccordionDetails>{p.content}</AccordionDetails>
+            </Accordion>
+          ))}
+        </Stack>
+      </CardContent>
     </Card>
   )
 }

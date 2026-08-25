@@ -1,12 +1,24 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Layout, Typography, Row, Col, Spin, Alert, Button, Tag, Empty } from 'antd'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import {
+  AppBar,
+  Toolbar,
+  Typography,
+  Box,
+  Container,
+  Grid,
+  CircularProgress,
+  Alert,
+  Button,
+  IconButton,
+  Chip,
+  Snackbar,
+} from '@mui/material'
+import AddIcon from '@mui/icons-material/Add'
+import RefreshIcon from '@mui/icons-material/Refresh'
 import InstanceCard from './InstanceCard'
 import NewInstanceModal from './NewInstanceModal'
 import { listInstances, getKinds, getOauthProviderStatus } from './api'
-
-const { Header, Content } = Layout
-const { Title, Text } = Typography
+import { setToastListener } from './toast'
 
 function App() {
   const [instances, setInstances] = useState(null)
@@ -15,6 +27,11 @@ function App() {
   const [oauthStatus, setOauthStatus] = useState(null)
   const [error, setError] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [toastState, setToastState] = useState({ open: false, severity: 'success', text: '' })
+
+  useEffect(() => {
+    setToastListener((severity, text) => setToastState({ open: true, severity, text }))
+  }, [])
 
   const refresh = useCallback(async () => {
     try {
@@ -38,36 +55,60 @@ function App() {
   }, [refresh])
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Header style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <Title level={3} style={{ color: 'white', margin: 0 }}>
-          sandbox-hub
-        </Title>
-        <Text style={{ color: 'rgba(255,255,255,0.65)' }}>local test resources, on demand</Text>
-        {oauthStatus?.state === 'running' && (
-          <Tag color="purple">oauth-provider running at {oauthStatus.url}</Tag>
-        )}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <Button icon={<PlusOutlined />} type="primary" onClick={() => setModalOpen(true)}>
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f5f5f5' }}>
+      <AppBar position="static" color="default" enableColorOnDark sx={{ bgcolor: '#0a0f1e' }}>
+        <Toolbar sx={{ gap: 2 }}>
+          <Typography variant="h6" sx={{ color: 'white', fontWeight: 700 }}>
+            sandbox-hub
+          </Typography>
+          <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.65)' }}>
+            local test resources, on demand
+          </Typography>
+          {oauthStatus?.state === 'running' && (
+            <Chip
+              size="small"
+              color="secondary"
+              label={`oauth-provider running at ${oauthStatus.url}`}
+            />
+          )}
+          <Box sx={{ flexGrow: 1 }} />
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setModalOpen(true)}>
             New
           </Button>
-          <Button type="text" icon={<ReloadOutlined />} style={{ color: 'white' }} onClick={refresh} />
-        </div>
-      </Header>
-      <Content style={{ padding: 24, maxWidth: 1100, margin: '0 auto', width: '100%' }}>
-        {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} showIcon />}
-        {!instances && !error && <Spin />}
-        {instances && instances.length === 0 && (
-          <Empty description="Nothing running yet. Click New to start a REST API, MCP server, mock API, webhook receiver, or chaos/rate-limit endpoint." style={{ marginTop: 64 }} />
+          <IconButton onClick={refresh} sx={{ color: 'white' }}>
+            <RefreshIcon />
+          </IconButton>
+        </Toolbar>
+      </AppBar>
+
+      <Container maxWidth="lg" sx={{ py: 3 }}>
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
         )}
-        <Row gutter={16}>
+        {!instances && !error && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 8 }}>
+            <CircularProgress />
+          </Box>
+        )}
+        {instances && instances.length === 0 && (
+          <Box sx={{ textAlign: 'center', mt: 8, color: 'text.secondary' }}>
+            <Typography>
+              Nothing running yet. Click New to start a REST API, MCP server, mock API, webhook
+              receiver, or chaos/rate-limit endpoint.
+            </Typography>
+          </Box>
+        )}
+        <Grid container spacing={2}>
           {(instances || []).map((inst) => (
-            <Col xs={24} md={12} key={inst.id}>
+            <Grid key={inst.id} size={{ xs: 12, md: 6 }}>
               <InstanceCard instance={inst} onChanged={refresh} />
-            </Col>
+            </Grid>
           ))}
-        </Row>
-      </Content>
+        </Grid>
+      </Container>
+
       <NewInstanceModal
         open={modalOpen}
         kinds={kinds}
@@ -75,7 +116,22 @@ function App() {
         onClose={() => setModalOpen(false)}
         onCreated={refresh}
       />
-    </Layout>
+
+      <Snackbar
+        open={toastState.open}
+        autoHideDuration={4000}
+        onClose={() => setToastState((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert
+          severity={toastState.severity}
+          variant="filled"
+          onClose={() => setToastState((s) => ({ ...s, open: false }))}
+        >
+          {toastState.text}
+        </Alert>
+      </Snackbar>
+    </Box>
   )
 }
 

@@ -1,8 +1,19 @@
 import { useState } from 'react'
-import { Modal, Form, Select, Input, Switch, Button, message, Typography } from 'antd'
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  TextField,
+  MenuItem,
+  FormControlLabel,
+  Switch,
+  Typography,
+  Stack,
+} from '@mui/material'
 import { createInstance } from './api'
-
-const { Text } = Typography
+import { toast } from './toast'
 
 const AUTH_LABELS = {
   none: 'No auth',
@@ -13,103 +24,112 @@ const AUTH_LABELS = {
   oauth: 'OAuth2',
 }
 
+const EMPTY_FORM = { kind: '', name: '', auth_mode: 'none', openapi_version: '3.1', openapi_protect: false }
+
 export default function NewInstanceModal({ open, kinds, authModes, onClose, onCreated }) {
-  const [form] = Form.useForm()
+  const [values, setValues] = useState(EMPTY_FORM)
   const [submitting, setSubmitting] = useState(false)
-  const kindId = Form.useWatch('kind', form)
-  const kind = kinds.find((k) => k.id === kindId)
+  const kind = kinds.find((k) => k.id === values.kind)
+
+  const set = (field) => (e) => {
+    const v = e?.target?.type === 'checkbox' ? e.target.checked : e?.target?.value
+    setValues((prev) => ({ ...prev, [field]: v }))
+  }
+
+  const handleClose = () => {
+    setValues(EMPTY_FORM)
+    onClose()
+  }
 
   const submit = async () => {
+    if (!values.kind) {
+      toast.error('pick a kind')
+      return
+    }
+    setSubmitting(true)
     try {
-      const values = await form.validateFields()
-      setSubmitting(true)
-      await createInstance(values)
-      message.success('started')
-      form.resetFields()
+      const payload = { kind: values.kind, name: values.name || undefined, auth_mode: values.auth_mode }
+      if (kind?.supports_openapi) {
+        payload.openapi_version = values.openapi_version
+        payload.openapi_protect = values.openapi_protect
+      }
+      await createInstance(payload)
+      toast.success('started')
+      setValues(EMPTY_FORM)
       onCreated()
       onClose()
     } catch (err) {
-      if (err?.errorFields) return // antd validation error, already shown inline
-      message.error(err.message)
+      toast.error(err.message)
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Modal
-      title="New resource"
-      open={open}
-      onCancel={onClose}
-      footer={[
-        <Button key="cancel" onClick={onClose}>
-          Cancel
-        </Button>,
-        <Button key="start" type="primary" loading={submitting} onClick={submit}>
-          Start
-        </Button>,
-      ]}
-      destroyOnHidden
-    >
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={{ auth_mode: 'none', openapi_version: '3.1', openapi_protect: false }}
-      >
-        <Form.Item name="kind" label="Kind" rules={[{ required: true, message: 'pick a kind' }]}>
-          <Select placeholder="Select what to run">
+    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
+      <DialogTitle>New resource</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <TextField select label="Kind" value={values.kind} onChange={set('kind')} required>
             {kinds.map((k) => (
-              <Select.Option key={k.id} value={k.id}>
+              <MenuItem key={k.id} value={k.id}>
                 {k.label}
-              </Select.Option>
+              </MenuItem>
             ))}
-          </Select>
-        </Form.Item>
+          </TextField>
 
-        {kind && (
-          <>
-            <Text type="secondary" style={{ display: 'block', marginTop: -12, marginBottom: 16 }}>
-              {kind.description}
-              {(kind.supports_routes || kind.supports_chaos_config) &&
-                ' Further settings are configured on the card after you start it.'}
-            </Text>
+          {kind && (
+            <>
+              <Typography variant="body2" color="text.secondary">
+                {kind.description}
+                {(kind.supports_routes || kind.supports_chaos_config) &&
+                  ' Further settings are configured on the card after you start it.'}
+              </Typography>
 
-            <Form.Item name="name" label="Name (optional)">
-              <Input placeholder={`e.g. "${kind.label} for testing my client"`} />
-            </Form.Item>
+              <TextField
+                label="Name (optional)"
+                value={values.name}
+                onChange={set('name')}
+                placeholder={`e.g. "${kind.label} for testing my client"`}
+              />
 
-            {kind.supports_auth && (
-              <Form.Item name="auth_mode" label="Auth">
-                <Select>
+              {kind.supports_auth && (
+                <TextField select label="Auth" value={values.auth_mode} onChange={set('auth_mode')}>
                   {authModes.map((m) => (
-                    <Select.Option key={m} value={m}>
+                    <MenuItem key={m} value={m}>
                       {AUTH_LABELS[m] || m}
-                    </Select.Option>
+                    </MenuItem>
                   ))}
-                </Select>
-              </Form.Item>
-            )}
+                </TextField>
+              )}
 
-            {kind.supports_openapi && (
-              <>
-                <Form.Item name="openapi_version" label="OpenAPI spec version">
-                  <Select>
-                    <Select.Option value="3.1">3.1</Select.Option>
-                    <Select.Option value="3.0">3.0</Select.Option>
-                  </Select>
-                </Form.Item>
-                <Form.Item
-                  name="openapi_protect"
-                  label="Protect the OpenAPI spec / docs behind a static token"
-                  valuePropName="checked"
-                >
-                  <Switch />
-                </Form.Item>
-              </>
-            )}
-          </>
-        )}
-      </Form>
-    </Modal>
+              {kind.supports_openapi && (
+                <>
+                  <TextField
+                    select
+                    label="OpenAPI spec version"
+                    value={values.openapi_version}
+                    onChange={set('openapi_version')}
+                  >
+                    <MenuItem value="3.1">3.1</MenuItem>
+                    <MenuItem value="3.0">3.0</MenuItem>
+                  </TextField>
+                  <FormControlLabel
+                    control={<Switch checked={values.openapi_protect} onChange={set('openapi_protect')} />}
+                    label="Protect the OpenAPI spec / docs behind a static token"
+                  />
+                </>
+              )}
+            </>
+          )}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={handleClose}>Cancel</Button>
+        <Button variant="contained" onClick={submit} disabled={submitting}>
+          Start
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }
