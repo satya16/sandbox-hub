@@ -24,6 +24,15 @@ jobs:
           - image: sandboxhub-oauth-provider
             context: resources/oauth-provider
             dockerfile: resources/oauth-provider/Dockerfile
+          - image: sandboxhub-mock-api
+            context: resources/mock-api
+            dockerfile: resources/mock-api/Dockerfile
+          - image: sandboxhub-webhook-receiver
+            context: resources/webhook-receiver
+            dockerfile: resources/webhook-receiver/Dockerfile
+          - image: sandboxhub-chaos-api
+            context: resources/chaos-api
+            dockerfile: resources/chaos-api/Dockerfile
     steps:
       - uses: actions/checkout@v4
 

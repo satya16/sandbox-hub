@@ -1,17 +1,28 @@
 """
 A small sample MCP server (streamable-http transport) whose auth behavior is
-controlled by env vars, so the same image serves as sandbox-hub's "plain",
-"api-key", and "oauth" MCP server resources.
+controlled by env vars, so the same image serves every auth variant of
+sandbox-hub's MCP server kind.
 
 AUTH_MODE=none    -> no auth
-AUTH_MODE=apikey  -> requires header  X-API-Key: <API_KEY>  (checked in ASGI middleware)
+AUTH_MODE=apikey  -> requires header  X-API-Key: <API_KEY>
+AUTH_MODE=basic   -> requires HTTP Basic auth (BASIC_USERNAME/BASIC_PASSWORD)
+AUTH_MODE=jwt     -> requires header  Authorization: Bearer <jwt>, a
+                     self-contained HS256 JWT verified locally with JWT_SECRET
+                     (no external calls) -- GET /_debug/token mints a fresh one
+AUTH_MODE=session -> POST /login with {username,password} (SESSION_USERNAME/
+                     SESSION_PASSWORD) sets a session cookie; that cookie then
+                     gates the MCP endpoint; POST /logout clears it
 AUTH_MODE=oauth   -> requires header  Authorization: Bearer <token>, verified via
                      OAUTH_INTROSPECT_URL (uses mcp's native TokenVerifier support)
 """
+import base64
+import http.cookies
 import os
+import secrets
 import time
 
 import httpx
+import jwt as pyjwt
 import uvicorn
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
@@ -22,9 +33,18 @@ from starlette.routing import Route
 
 AUTH_MODE = os.environ.get("AUTH_MODE", "none")
 API_KEY = os.environ.get("API_KEY", "")
+BASIC_USERNAME = os.environ.get("BASIC_USERNAME", "")
+BASIC_PASSWORD = os.environ.get("BASIC_PASSWORD", "")
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
+JWT_TTL_SECONDS = int(os.environ.get("JWT_TTL_SECONDS", "86400"))
+SESSION_USERNAME = os.environ.get("SESSION_USERNAME", "")
+SESSION_PASSWORD = os.environ.get("SESSION_PASSWORD", "")
 OAUTH_INTROSPECT_URL = os.environ.get("OAUTH_INTROSPECT_URL", "")
 OAUTH_ISSUER_URL = os.environ.get("OAUTH_ISSUER_URL", "")
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "http://localhost:8000")
+
+SESSION_COOKIE = "sandboxhub_session"
+_active_sessions: set[str] = set()
 
 
 class IntrospectionTokenVerifier(TokenVerifier):
@@ -81,12 +101,60 @@ async def health(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "auth_mode": AUTH_MODE})
 
 
-# Add directly to the mcp app's own router so the session manager's lifespan
-# (started by uvicorn against this exact app object) still covers this route.
-app.router.routes.insert(0, Route("/health", health))
+def _mint_jwt() -> str:
+    now = int(time.time())
+    return pyjwt.encode(
+        {"sub": "sandbox-hub-tester", "iat": now, "exp": now + JWT_TTL_SECONDS},
+        JWT_SECRET,
+        algorithm="HS256",
+    )
 
 
-class ApiKeyMiddleware:
+async def debug_token(request: Request) -> JSONResponse:
+    if AUTH_MODE != "jwt":
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse({"token": _mint_jwt(), "expires_in": JWT_TTL_SECONDS})
+
+
+async def login(request: Request) -> JSONResponse:
+    if AUTH_MODE != "session":
+        return JSONResponse({"error": "not found"}, status_code=404)
+    payload = await request.json()
+    if not (
+        secrets.compare_digest(str(payload.get("username", "")), SESSION_USERNAME)
+        and secrets.compare_digest(str(payload.get("password", "")), SESSION_PASSWORD)
+    ):
+        return JSONResponse({"error": "invalid username/password"}, status_code=401)
+    session_id = secrets.token_urlsafe(24)
+    _active_sessions.add(session_id)
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax")
+    return resp
+
+
+async def logout(request: Request) -> JSONResponse:
+    if AUTH_MODE != "session":
+        return JSONResponse({"error": "not found"}, status_code=404)
+    _active_sessions.discard(request.cookies.get(SESSION_COOKIE))
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
+
+
+# Added directly to the mcp app's own router (rather than a wrapping
+# Starlette app) so the session manager's lifespan -- started by uvicorn
+# against this exact app object -- still covers these routes.
+app.router.routes[:0] = [
+    Route("/health", health),
+    Route("/_debug/token", debug_token),
+    Route("/login", login, methods=["POST"]),
+    Route("/logout", logout, methods=["POST"]),
+]
+
+UNAUTHED_PATHS = {"/health", "/_debug/token", "/login", "/logout"}
+
+
+class AuthMiddleware:
     """Wraps the ASGI app; forwards lifespan events untouched so the MCP
     session manager's task group still gets initialized by uvicorn."""
 
@@ -94,20 +162,65 @@ class ApiKeyMiddleware:
         self.inner = inner
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope["path"] == "/health":
+        if scope["type"] != "http" or scope["path"] in UNAUTHED_PATHS:
             await self.inner(scope, receive, send)
             return
-        headers = dict(scope["headers"])
-        key = headers.get(b"x-api-key", b"").decode()
-        if key != API_KEY:
-            response = JSONResponse({"error": "missing or invalid X-API-Key header"}, status_code=401)
+
+        headers = {k.decode(): v.decode() for k, v in scope["headers"]}
+        ok, error, challenge = self._check(headers)
+        if not ok:
+            resp_headers = {"WWW-Authenticate": challenge} if challenge else {}
+            response = JSONResponse({"error": error}, status_code=401, headers=resp_headers)
             await response(scope, receive, send)
             return
         await self.inner(scope, receive, send)
 
+    def _check(self, headers):
+        if AUTH_MODE == "apikey":
+            if headers.get("x-api-key") != API_KEY:
+                return False, "missing or invalid X-API-Key header", None
+            return True, None, None
 
-if AUTH_MODE == "apikey":
-    app = ApiKeyMiddleware(app)
+        if AUTH_MODE == "basic":
+            auth = headers.get("authorization", "")
+            if not auth.startswith("Basic "):
+                return False, "missing Basic auth", "Basic"
+            try:
+                decoded = base64.b64decode(auth.removeprefix("Basic ").strip()).decode()
+                user, _, pwd = decoded.partition(":")
+            except Exception:
+                return False, "malformed Basic auth header", "Basic"
+            if not (secrets.compare_digest(user, BASIC_USERNAME) and secrets.compare_digest(pwd, BASIC_PASSWORD)):
+                return False, "invalid credentials", "Basic"
+            return True, None, None
+
+        if AUTH_MODE == "jwt":
+            auth = headers.get("authorization", "")
+            if not auth.startswith("Bearer "):
+                return False, "missing Bearer token", None
+            token = auth.removeprefix("Bearer ").strip()
+            try:
+                pyjwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            except pyjwt.ExpiredSignatureError:
+                return False, "token expired", None
+            except pyjwt.InvalidTokenError as exc:
+                return False, f"invalid token: {exc}", None
+            return True, None, None
+
+        if AUTH_MODE == "session":
+            cookie_header = headers.get("cookie", "")
+            jar = http.cookies.SimpleCookie()
+            jar.load(cookie_header)
+            session_id = jar[SESSION_COOKIE].value if SESSION_COOKIE in jar else None
+            if not session_id or session_id not in _active_sessions:
+                return False, "not logged in -- POST /login first", None
+            return True, None, None
+
+        return True, None, None  # "none" and "oauth" (oauth handled natively by mcp itself)
+
+
+if AUTH_MODE in ("apikey", "basic", "jwt", "session"):
+    app = AuthMiddleware(app)
 
 
 if __name__ == "__main__":

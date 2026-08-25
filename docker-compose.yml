@@ -13,6 +13,8 @@ services:
       - SANDBOXHUB_NETWORK=sandboxhub-net
       - SANDBOXHUB_BIND_HOST=127.0.0.1
       - OAUTH_ADMIN_TOKEN=dev-admin-token
+      - CHAOS_ADMIN_TOKEN=dev-admin-token
+      - MOCK_ADMIN_TOKEN=dev-admin-token
     networks:
       - sandboxhub-net
     restart: unless-stopped
@@ -33,6 +35,21 @@ services:
   oauth-provider-image:
     build: ./resources/oauth-provider
     image: sandboxhub/oauth-provider:latest
+    profiles: ["build-only"]
+
+  mock-api-image:
+    build: ./resources/mock-api
+    image: sandboxhub/mock-api:latest
+    profiles: ["build-only"]
+
+  webhook-receiver-image:
+    build: ./resources/webhook-receiver
+    image: sandboxhub/webhook-receiver:latest
+    profiles: ["build-only"]
+
+  chaos-api-image:
+    build: ./resources/chaos-api
+    image: sandboxhub/chaos-api:latest
     profiles: ["build-only"]
 
 networks:

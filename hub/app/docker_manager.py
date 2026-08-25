@@ -19,13 +19,15 @@ import docker
 import httpx
 from docker.errors import NotFound
 
-from .catalog import KINDS, OAUTH_PROVIDER_CONTAINER_PORT, OAUTH_PROVIDER_IMAGE
+from .catalog import AUTH_MODES, KINDS, OAUTH_PROVIDER_CONTAINER_PORT, OAUTH_PROVIDER_IMAGE
 
 NETWORK_NAME = os.environ.get("SANDBOXHUB_NETWORK", "sandboxhub-net")
 BIND_HOST = os.environ.get("SANDBOXHUB_BIND_HOST", "127.0.0.1")
 CONTAINER_PREFIX = "sandboxhub-"
 OAUTH_PROVIDER_NAME = f"{CONTAINER_PREFIX}oauth-provider"
 ADMIN_TOKEN = os.environ.get("OAUTH_ADMIN_TOKEN", "dev-admin-token")
+CHAOS_ADMIN_TOKEN = os.environ.get("CHAOS_ADMIN_TOKEN", "dev-admin-token")
+MOCK_ADMIN_TOKEN = os.environ.get("MOCK_ADMIN_TOKEN", "dev-admin-token")
 
 LABEL_MANAGED = "sandboxhub.managed"
 LABEL_ROLE = "sandboxhub.role"  # "instance" | "infra"
@@ -39,6 +41,11 @@ client = docker.from_env()
 # hub or the oauth-provider container restarts, same as the provider's own
 # in-memory client store.
 _oauth_client_cache: dict[str, dict] = {}
+
+# instance_id -> a currently-valid JWT for "jwt" auth mode instances. The
+# resource itself mints these statelessly from JWT_SECRET on request, so this
+# is just a convenience cache to avoid an extra round trip on every list call.
+_jwt_token_cache: dict[str, str] = {}
 
 
 def _free_port() -> int:
@@ -86,6 +93,26 @@ def _wait_for_http(url: str, timeout: float = 10.0):
         except httpx.HTTPError:
             pass
         time.sleep(0.3)
+
+
+def _instance_internal_url(instance_id: str, kind: str, path: str) -> str:
+    return _internal_url(_container_name(instance_id), KINDS[kind].container_port, path)
+
+
+def _request(method: str, url: str, timeout: float = 3.0, **kwargs) -> httpx.Response:
+    """httpx request with a short retry against connection errors -- calls
+    into an instance's own admin endpoints can otherwise race a
+    just-created container whose app hasn't finished starting yet."""
+    deadline = time.time() + timeout
+    while True:
+        try:
+            resp = httpx.request(method, url, timeout=2, **kwargs)
+            resp.raise_for_status()
+            return resp
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            if time.time() >= deadline:
+                raise
+            time.sleep(0.2)
 
 
 # ---------------------------------------------------------------- oauth infra
@@ -181,16 +208,43 @@ def _build_env(kind: str, config: dict) -> dict:
 
     if auth_mode == "apikey":
         env["API_KEY"] = secrets.token_urlsafe(18)
+    elif auth_mode == "basic":
+        env["BASIC_USERNAME"] = "sandbox"
+        env["BASIC_PASSWORD"] = secrets.token_urlsafe(12)
+    elif auth_mode == "jwt":
+        env["JWT_SECRET"] = secrets.token_urlsafe(32)
+    elif auth_mode == "session":
+        env["SESSION_USERNAME"] = "sandbox"
+        env["SESSION_PASSWORD"] = secrets.token_urlsafe(12)
+
+    if kind == "chaos-api":
+        env["CHAOS_ADMIN_TOKEN"] = CHAOS_ADMIN_TOKEN
+    if kind == "mock-api":
+        env["MOCK_ADMIN_TOKEN"] = MOCK_ADMIN_TOKEN
 
     return env
+
+
+def _fetch_jwt_token(instance_id: str, kind: str) -> Optional[str]:
+    try:
+        resp = httpx.get(_instance_internal_url(instance_id, kind, "/_debug/token"), timeout=5)
+        resp.raise_for_status()
+        token = resp.json()["token"]
+        _jwt_token_cache[instance_id] = token
+        return token
+    except httpx.HTTPError:
+        return None
 
 
 def create_instance(kind: str, name: Optional[str], config: dict) -> dict:
     if kind not in KINDS:
         raise ValueError(f"unknown kind {kind!r}")
     kdef = KINDS[kind]
+
+    if not kdef.supports_auth:
+        config["auth_mode"] = "none"
     auth_mode = config.get("auth_mode", "none")
-    if auth_mode not in ("none", "apikey", "oauth"):
+    if auth_mode not in AUTH_MODES:
         raise ValueError(f"unknown auth_mode {auth_mode!r}")
 
     ensure_network()
@@ -224,15 +278,39 @@ def create_instance(kind: str, name: Optional[str], config: dict) -> dict:
         restart_policy={"Name": "unless-stopped"},
     )
 
+    # Wait for the container's own app to actually accept connections before
+    # returning it as "running" -- callers (the UI, or whoever the instance
+    # URL gets handed to) shouldn't have to guess how long that takes.
+    _wait_for_http(_instance_internal_url(instance_id, kind, "/health"))
+
     if auth_mode == "oauth":
         _register_oauth_client(instance_id)
+    elif auth_mode == "jwt":
+        _fetch_jwt_token(instance_id, kind)
 
     return instance_detail(instance_id)
 
 
-def _describe_auth(auth_mode: str, instance_id: str, env: dict) -> dict:
+def _describe_auth(auth_mode: str, instance_id: str, kind: str, env: dict, url: Optional[str]) -> dict:
     if auth_mode == "apikey":
         return {"mode": "apikey", "header": "X-API-Key", "api_key": env.get("API_KEY")}
+    if auth_mode == "basic":
+        return {"mode": "basic", "username": env.get("BASIC_USERNAME"), "password": env.get("BASIC_PASSWORD")}
+    if auth_mode == "jwt":
+        return {
+            "mode": "jwt",
+            "header": "Authorization: Bearer <token>",
+            "token": _jwt_token_cache.get(instance_id),
+            "debug_token_url": f"{url}/_debug/token" if url else None,
+        }
+    if auth_mode == "session":
+        return {
+            "mode": "session",
+            "login_url": f"{url}/login" if url else None,
+            "logout_url": f"{url}/logout" if url else None,
+            "username": env.get("SESSION_USERNAME"),
+            "password": env.get("SESSION_PASSWORD"),
+        }
     if auth_mode == "oauth":
         creds = _oauth_client_cache.get(instance_id, {})
         provider = oauth_provider_status()
@@ -264,7 +342,7 @@ def instance_detail(instance_id: str) -> Optional[dict]:
         "state": container.status,
         "url": url,
         "created_at": container.attrs.get("Created"),
-        "auth": _describe_auth(config.get("auth_mode", "none"), instance_id, env),
+        "auth": _describe_auth(config.get("auth_mode", "none"), instance_id, kind, env, url),
     }
 
     if kind == "rest-api":
@@ -278,6 +356,20 @@ def instance_detail(instance_id: str) -> Optional[dict]:
         if openapi["protected"]:
             openapi["auth"] = {"header": "X-API-Key", "token": env.get("OPENAPI_TOKEN")}
         detail["openapi"] = openapi
+
+    if kind == "chaos-api" and container.status == "running":
+        try:
+            resp = httpx.get(_instance_internal_url(instance_id, kind, "/_config"), timeout=3)
+            detail["chaos"] = resp.json()
+        except httpx.HTTPError:
+            detail["chaos"] = None
+
+    if kind == "mock-api" and container.status == "running":
+        try:
+            resp = httpx.get(_instance_internal_url(instance_id, kind, "/_routes"), timeout=3)
+            detail["mock_routes"] = resp.json()
+        except httpx.HTTPError:
+            detail["mock_routes"] = []
 
     return detail
 
@@ -320,11 +412,12 @@ def rotate_instance(instance_id: str) -> dict:
         _register_oauth_client(instance_id)
         return instance_detail(instance_id)
 
-    if auth_mode != "apikey" and not config.get("openapi_protect"):
+    if auth_mode not in ("apikey", "basic", "jwt", "session") and not config.get("openapi_protect"):
         raise ValueError("instance has no rotatable credential")
 
-    # apikey / openapi-token secrets are baked into the container's env at
-    # creation time, so rotating means recreating on the same port.
+    # apikey/basic/jwt/session secrets (and the openapi-protect token) are
+    # baked into the container's env at creation time, so rotating means
+    # recreating on the same port.
     port = _host_port(container, KINDS[kind].container_port)
     container.stop(timeout=5)
     container.remove()
@@ -347,6 +440,9 @@ def rotate_instance(instance_id: str) -> dict:
         },
         restart_policy={"Name": "unless-stopped"},
     )
+    _wait_for_http(_instance_internal_url(instance_id, kind, "/health"))
+    if auth_mode == "jwt":
+        _fetch_jwt_token(instance_id, kind)
     return instance_detail(instance_id)
 
 
@@ -363,3 +459,62 @@ def stream_logs(instance_id: str):
         return
     for chunk in container.logs(stream=True, follow=True, tail=50):
         yield chunk.decode(errors="replace")
+
+
+# ------------------------------------------------------------- chaos-api config
+
+
+def configure_chaos(instance_id: str, payload: dict) -> dict:
+    resp = _request(
+        "PUT",
+        _instance_internal_url(instance_id, "chaos-api", "/_config"),
+        json=payload,
+        headers={"X-Admin-Token": CHAOS_ADMIN_TOKEN},
+    )
+    return resp.json()
+
+
+# --------------------------------------------------------------- mock-api routes
+
+
+def list_routes(instance_id: str) -> list[dict]:
+    resp = _request("GET", _instance_internal_url(instance_id, "mock-api", "/_routes"))
+    return resp.json()
+
+
+def create_route(instance_id: str, payload: dict) -> dict:
+    resp = _request(
+        "POST",
+        _instance_internal_url(instance_id, "mock-api", "/_routes"),
+        json=payload,
+        headers={"X-Admin-Token": MOCK_ADMIN_TOKEN},
+    )
+    return resp.json()
+
+
+def delete_route(instance_id: str, route_id: str):
+    _request(
+        "DELETE",
+        _instance_internal_url(instance_id, "mock-api", f"/_routes/{route_id}"),
+        headers={"X-Admin-Token": MOCK_ADMIN_TOKEN},
+    )
+
+
+def clear_routes(instance_id: str):
+    _request(
+        "DELETE",
+        _instance_internal_url(instance_id, "mock-api", "/_routes"),
+        headers={"X-Admin-Token": MOCK_ADMIN_TOKEN},
+    )
+
+
+# --------------------------------------------------------- webhook-receiver log
+
+
+def list_webhook_requests(instance_id: str) -> list[dict]:
+    resp = _request("GET", _instance_internal_url(instance_id, "webhook-receiver", "/_requests"))
+    return resp.json()
+
+
+def clear_webhook_requests(instance_id: str):
+    _request("DELETE", _instance_internal_url(instance_id, "webhook-receiver", "/_requests"))

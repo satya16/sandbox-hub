@@ -4,8 +4,15 @@ Minimal local OAuth2 authorization server for testing purposes only.
 Supports:
   - client_credentials grant (machine-to-machine)
   - authorization_code grant + PKCE (interactive login flow)
+  - refresh_token grant (rotating: each use invalidates the old refresh token
+    and issues a new one, so clients that forget to persist the new one break
+    loudly instead of silently)
   - token introspection (RFC 7662) for resource servers to validate tokens
   - dynamic client registration via an internal admin endpoint used by the hub
+
+Access tokens default to a short 2-minute lifetime specifically so a client
+under test actually has to exercise the refresh flow in a normal session
+rather than waiting an hour. Override with OAUTH_ACCESS_TTL_SECONDS.
 
 State is in-memory and resets on restart -- this is disposable test infra,
 not a real identity provider. Do not use for anything real.
@@ -22,7 +29,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 ADMIN_TOKEN = os.environ.get("OAUTH_ADMIN_TOKEN", "dev-admin-token")
-TOKEN_TTL_SECONDS = 3600
+TOKEN_TTL_SECONDS = int(os.environ.get("OAUTH_ACCESS_TTL_SECONDS", "120"))
 AUTH_CODE_TTL_SECONDS = 120
 
 app = FastAPI(title="sandbox-hub local OAuth provider")
@@ -30,6 +37,7 @@ app = FastAPI(title="sandbox-hub local OAuth provider")
 clients: dict[str, dict] = {}
 auth_codes: dict[str, dict] = {}
 tokens: dict[str, dict] = {}
+refresh_tokens: dict[str, dict] = {}
 
 
 def new_id(prefix: str, n: int = 16) -> str:
@@ -71,7 +79,7 @@ def metadata(request: Request):
         "authorization_endpoint": f"{base}/authorize",
         "token_endpoint": f"{base}/token",
         "introspection_endpoint": f"{base}/introspect",
-        "grant_types_supported": ["authorization_code", "client_credentials"],
+        "grant_types_supported": ["authorization_code", "client_credentials", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
         "response_types_supported": ["code"],
     }
@@ -145,10 +153,13 @@ def issue_token(client_id: str, scope: str = "") -> dict:
         "scope": scope,
         "expires_at": time.time() + TOKEN_TTL_SECONDS,
     }
+    refresh_token = new_id("rt", 24)
+    refresh_tokens[refresh_token] = {"client_id": client_id, "scope": scope}
     return {
         "access_token": access_token,
         "token_type": "Bearer",
         "expires_in": TOKEN_TTL_SECONDS,
+        "refresh_token": refresh_token,
         "scope": scope,
     }
 
@@ -161,6 +172,7 @@ def token(
     code: Optional[str] = Form(None),
     redirect_uri: Optional[str] = Form(None),
     code_verifier: Optional[str] = Form(None),
+    refresh_token: Optional[str] = Form(None),
     scope: Optional[str] = Form(""),
 ):
     if grant_type == "client_credentials":
@@ -181,6 +193,14 @@ def token(
             if not code_verifier or not verify_pkce(code_verifier, entry["code_challenge"]):
                 raise HTTPException(400, "invalid code_verifier")
         return issue_token(client_id, scope or "")
+
+    if grant_type == "refresh_token":
+        entry = refresh_tokens.pop(refresh_token or "", None)
+        if not entry:
+            raise HTTPException(400, "invalid or already-used refresh_token")
+        if client_id and entry["client_id"] != client_id:
+            raise HTTPException(400, "client_id mismatch")
+        return issue_token(entry["client_id"], entry["scope"])
 
     raise HTTPException(400, "unsupported grant_type")
 

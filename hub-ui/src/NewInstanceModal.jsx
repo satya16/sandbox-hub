@@ -1,14 +1,19 @@
 import { useState } from 'react'
-import { Modal, Form, Select, Input, Switch, Button, message } from 'antd'
+import { Modal, Form, Select, Input, Switch, Button, message, Typography } from 'antd'
 import { createInstance } from './api'
+
+const { Text } = Typography
 
 const AUTH_LABELS = {
   none: 'No auth',
   apikey: 'Static API key',
+  basic: 'HTTP Basic',
+  jwt: 'Self-contained JWT',
+  session: 'Cookie / session login',
   oauth: 'OAuth2',
 }
 
-export default function NewInstanceModal({ open, kinds, onClose, onCreated }) {
+export default function NewInstanceModal({ open, kinds, authModes, onClose, onCreated }) {
   const [form] = Form.useForm()
   const [submitting, setSubmitting] = useState(false)
   const kindId = Form.useWatch('kind', form)
@@ -63,19 +68,27 @@ export default function NewInstanceModal({ open, kinds, onClose, onCreated }) {
 
         {kind && (
           <>
+            <Text type="secondary" style={{ display: 'block', marginTop: -12, marginBottom: 16 }}>
+              {kind.description}
+              {(kind.supports_routes || kind.supports_chaos_config) &&
+                ' Further settings are configured on the card after you start it.'}
+            </Text>
+
             <Form.Item name="name" label="Name (optional)">
               <Input placeholder={`e.g. "${kind.label} for testing my client"`} />
             </Form.Item>
 
-            <Form.Item name="auth_mode" label="Auth">
-              <Select>
-                {['none', 'apikey', 'oauth'].map((m) => (
-                  <Select.Option key={m} value={m}>
-                    {AUTH_LABELS[m]}
-                  </Select.Option>
-                ))}
-              </Select>
-            </Form.Item>
+            {kind.supports_auth && (
+              <Form.Item name="auth_mode" label="Auth">
+                <Select>
+                  {authModes.map((m) => (
+                    <Select.Option key={m} value={m}>
+                      {AUTH_LABELS[m] || m}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            )}
 
             {kind.supports_openapi && (
               <>

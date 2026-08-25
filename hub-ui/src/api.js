@@ -9,6 +9,11 @@ async function request(path, options) {
   return resp.json()
 }
 
+const jsonBody = (payload) => ({
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(payload),
+})
+
 export const getKinds = () => request('/kinds')
 export const listInstances = () => request('/instances')
 export const createInstance = (payload) =>
@@ -20,6 +25,17 @@ export const createInstance = (payload) =>
 export const deleteInstance = (id) => request(`/instances/${id}`, { method: 'DELETE' })
 export const rotateInstance = (id) => request(`/instances/${id}/rotate`, { method: 'POST' })
 export const getOauthProviderStatus = () => request('/oauth-provider')
+
+export const setChaosConfig = (id, payload) =>
+  request(`/instances/${id}/chaos-config`, { method: 'PUT', ...jsonBody(payload) })
+
+export const listRoutes = (id) => request(`/instances/${id}/routes`)
+export const createRoute = (id, payload) =>
+  request(`/instances/${id}/routes`, { method: 'POST', ...jsonBody(payload) })
+export const deleteRoute = (id, routeId) => request(`/instances/${id}/routes/${routeId}`, { method: 'DELETE' })
+
+export const listWebhookRequests = (id) => request(`/instances/${id}/webhook-requests`)
+export const clearWebhookRequests = (id) => request(`/instances/${id}/webhook-requests`, { method: 'DELETE' })
 
 export function logsSocketUrl(id) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'

@@ -29,6 +29,9 @@ def list_kinds():
                 "label": k.label,
                 "description": k.description,
                 "supports_openapi": k.supports_openapi,
+                "supports_auth": k.supports_auth,
+                "supports_chaos_config": k.supports_chaos_config,
+                "supports_routes": k.supports_routes,
             }
             for k in KINDS.values()
         ],
@@ -128,6 +131,102 @@ async def stream_logs_ws(websocket: WebSocket, instance_id: str):
 @app.get("/api/oauth-provider")
 def oauth_provider_status():
     return dm.oauth_provider_status()
+
+
+# ------------------------------------------------------------- chaos-api config
+
+
+class ChaosConfigRequest(BaseModel):
+    mode: str
+    rate_limit: Optional[dict] = None
+    chaos: Optional[dict] = None
+
+
+@app.put("/api/instances/{instance_id}/chaos-config")
+def set_chaos_config(instance_id: str, req: ChaosConfigRequest):
+    detail = dm.instance_detail(instance_id)
+    if detail is None:
+        raise HTTPException(404, "unknown instance")
+    if detail["kind"] != "chaos-api":
+        raise HTTPException(400, "not a chaos-api instance")
+    try:
+        return dm.configure_chaos(instance_id, req.model_dump(exclude_none=True))
+    except Exception as exc:
+        raise HTTPException(502, str(exc))
+
+
+# --------------------------------------------------------------- mock-api routes
+
+
+class MockRouteRequest(BaseModel):
+    method: str = "*"
+    path: str = "*"
+    status_code: int = 200
+    response_body: object = {"ok": True}
+    required_fields: list[str] = []
+
+
+@app.get("/api/instances/{instance_id}/routes")
+def get_routes(instance_id: str):
+    detail = dm.instance_detail(instance_id)
+    if detail is None:
+        raise HTTPException(404, "unknown instance")
+    if detail["kind"] != "mock-api":
+        raise HTTPException(400, "not a mock-api instance")
+    return dm.list_routes(instance_id)
+
+
+@app.post("/api/instances/{instance_id}/routes")
+def add_route(instance_id: str, req: MockRouteRequest):
+    detail = dm.instance_detail(instance_id)
+    if detail is None:
+        raise HTTPException(404, "unknown instance")
+    if detail["kind"] != "mock-api":
+        raise HTTPException(400, "not a mock-api instance")
+    try:
+        return dm.create_route(instance_id, req.model_dump())
+    except Exception as exc:
+        raise HTTPException(502, str(exc))
+
+
+@app.delete("/api/instances/{instance_id}/routes/{route_id}")
+def remove_route(instance_id: str, route_id: str):
+    detail = dm.instance_detail(instance_id)
+    if detail is None:
+        raise HTTPException(404, "unknown instance")
+    dm.delete_route(instance_id, route_id)
+    return {"ok": True}
+
+
+@app.delete("/api/instances/{instance_id}/routes")
+def remove_all_routes(instance_id: str):
+    detail = dm.instance_detail(instance_id)
+    if detail is None:
+        raise HTTPException(404, "unknown instance")
+    dm.clear_routes(instance_id)
+    return {"ok": True}
+
+
+# --------------------------------------------------------- webhook-receiver log
+
+
+@app.get("/api/instances/{instance_id}/webhook-requests")
+def get_webhook_requests(instance_id: str):
+    detail = dm.instance_detail(instance_id)
+    if detail is None:
+        raise HTTPException(404, "unknown instance")
+    if detail["kind"] != "webhook-receiver":
+        raise HTTPException(400, "not a webhook-receiver instance")
+    return dm.list_webhook_requests(instance_id)
+
+
+@app.delete("/api/instances/{instance_id}/webhook-requests")
+def clear_webhook_requests(instance_id: str):
+    detail = dm.instance_detail(instance_id)
+    if detail is None:
+        raise HTTPException(404, "unknown instance")
+    dm.clear_webhook_requests(instance_id)
+    return {"ok": True}
 
 
 @app.get("/api/health")

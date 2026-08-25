@@ -11,6 +11,7 @@ const { Title, Text } = Typography
 function App() {
   const [instances, setInstances] = useState(null)
   const [kinds, setKinds] = useState([])
+  const [authModes, setAuthModes] = useState([])
   const [oauthStatus, setOauthStatus] = useState(null)
   const [error, setError] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
@@ -27,7 +28,10 @@ function App() {
   }, [])
 
   useEffect(() => {
-    getKinds().then((d) => setKinds(d.kinds))
+    getKinds().then((d) => {
+      setKinds(d.kinds)
+      setAuthModes(d.auth_modes)
+    })
     refresh()
     const interval = setInterval(refresh, 5000)
     return () => clearInterval(interval)
@@ -54,7 +58,7 @@ function App() {
         {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} showIcon />}
         {!instances && !error && <Spin />}
         {instances && instances.length === 0 && (
-          <Empty description="Nothing running yet. Click New to start a REST API or MCP server." style={{ marginTop: 64 }} />
+          <Empty description="Nothing running yet. Click New to start a REST API, MCP server, mock API, webhook receiver, or chaos/rate-limit endpoint." style={{ marginTop: 64 }} />
         )}
         <Row gutter={16}>
           {(instances || []).map((inst) => (
@@ -67,6 +71,7 @@ function App() {
       <NewInstanceModal
         open={modalOpen}
         kinds={kinds}
+        authModes={authModes}
         onClose={() => setModalOpen(false)}
         onCreated={refresh}
       />
