@@ -9,13 +9,19 @@ async function request(path, options) {
   return resp.json()
 }
 
-export const listResources = () => request('/resources')
-export const startResource = (id) => request(`/resources/${id}/start`, { method: 'POST' })
-export const stopResource = (id) => request(`/resources/${id}/stop`, { method: 'POST' })
-export const rotateResource = (id) => request(`/resources/${id}/rotate`, { method: 'POST' })
-export const fetchLogs = (id) => request(`/resources/${id}/logs`)
+export const getKinds = () => request('/kinds')
+export const listInstances = () => request('/instances')
+export const createInstance = (payload) =>
+  request('/instances', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+export const deleteInstance = (id) => request(`/instances/${id}`, { method: 'DELETE' })
+export const rotateInstance = (id) => request(`/instances/${id}/rotate`, { method: 'POST' })
+export const getOauthProviderStatus = () => request('/oauth-provider')
 
 export function logsSocketUrl(id) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${window.location.host}${BASE}/resources/${id}/logs/stream`
+  return `${proto}://${window.location.host}${BASE}/instances/${id}/logs/stream`
 }

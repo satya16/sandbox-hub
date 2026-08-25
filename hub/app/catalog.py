@@ -1,103 +1,46 @@
 """
-Static catalog of everything sandbox-hub can spin up. Each entry describes a
-Docker container the hub can create/start/stop, driven entirely off this
-table -- there is no per-resource code elsewhere in the hub.
+Schema for what sandbox-hub can create. Unlike a fixed catalog of toggleable
+resources, this only describes the *kinds* of things the hub knows how to
+run and the settings each kind accepts -- actual running things are
+instances, created on demand with whatever settings the user picks, and any
+number of them can exist at once.
 """
 from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
-class ResourceDef:
+class KindDef:
     id: str
-    category: str  # "infra" | "rest-api" | "mcp-server"
-    name: str
+    label: str
     description: str
     image: str
     container_port: int
-    host_port: int
-    auth_mode: str  # "none" | "apikey" | "oauth" | "n/a" (infra)
-    requires: tuple[str, ...] = field(default_factory=tuple)
-    health_path: str = "/health"
+    supports_openapi: bool = False
 
 
-CATALOG: dict[str, ResourceDef] = {
+KINDS: dict[str, KindDef] = {
     d.id: d
     for d in [
-        ResourceDef(
-            id="oauth-provider",
-            category="infra",
-            name="Local OAuth2 Provider",
-            description=(
-                "Minimal OAuth2 authorization server (client_credentials + "
-                "authorization_code/PKCE) used to back the OAuth-gated "
-                "resources below. Started automatically when needed."
-            ),
-            image="sandboxhub/oauth-provider:latest",
-            container_port=8000,
-            host_port=8199,
-            auth_mode="n/a",
-        ),
-        ResourceDef(
-            id="rest-none",
-            category="rest-api",
-            name="REST API",
-            description="Sample REST API with no authentication.",
+        KindDef(
+            id="rest-api",
+            label="REST API",
+            description="A small sample REST API (/items).",
             image="sandboxhub/rest-api:latest",
             container_port=8000,
-            host_port=8101,
-            auth_mode="none",
+            supports_openapi=True,
         ),
-        ResourceDef(
-            id="rest-apikey",
-            category="rest-api",
-            name="REST API (API key)",
-            description="Sample REST API gated behind a static X-API-Key header.",
-            image="sandboxhub/rest-api:latest",
-            container_port=8000,
-            host_port=8102,
-            auth_mode="apikey",
-        ),
-        ResourceDef(
-            id="rest-oauth",
-            category="rest-api",
-            name="REST API (OAuth2)",
-            description="Sample REST API gated behind an OAuth2 Bearer token.",
-            image="sandboxhub/rest-api:latest",
-            container_port=8000,
-            host_port=8103,
-            auth_mode="oauth",
-            requires=("oauth-provider",),
-        ),
-        ResourceDef(
-            id="mcp-none",
-            category="mcp-server",
-            name="MCP Server",
-            description="Sample MCP server (streamable-http) with no authentication.",
+        KindDef(
+            id="mcp-server",
+            label="MCP Server",
+            description="A small sample MCP server (streamable-http) with echo/add/current_time tools.",
             image="sandboxhub/mcp-server:latest",
             container_port=8000,
-            host_port=8111,
-            auth_mode="none",
-        ),
-        ResourceDef(
-            id="mcp-apikey",
-            category="mcp-server",
-            name="MCP Server (API key)",
-            description="Sample MCP server gated behind a static X-API-Key header.",
-            image="sandboxhub/mcp-server:latest",
-            container_port=8000,
-            host_port=8112,
-            auth_mode="apikey",
-        ),
-        ResourceDef(
-            id="mcp-oauth",
-            category="mcp-server",
-            name="MCP Server (OAuth2)",
-            description="Sample MCP server gated behind OAuth2 (spec-compliant Bearer + WWW-Authenticate).",
-            image="sandboxhub/mcp-server:latest",
-            container_port=8000,
-            host_port=8113,
-            auth_mode="oauth",
-            requires=("oauth-provider",),
         ),
     ]
 }
+
+AUTH_MODES = ["none", "apikey", "oauth"]
+OPENAPI_VERSIONS = ["3.0", "3.1"]
+
+OAUTH_PROVIDER_IMAGE = "sandboxhub/oauth-provider:latest"
+OAUTH_PROVIDER_CONTAINER_PORT = 8000

@@ -1,12 +1,14 @@
 import asyncio
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from . import docker_manager as dm
-from .catalog import CATALOG
+from .catalog import AUTH_MODES, KINDS, OPENAPI_VERSIONS
 
 app = FastAPI(title="sandbox-hub")
 
@@ -18,98 +20,99 @@ app.add_middleware(
 )
 
 
-@app.get("/api/resources")
-def list_resources():
-    out = []
-    for rid, rdef in CATALOG.items():
-        s = dm.status(rid)
-        out.append(
-            {
-                "id": rdef.id,
-                "category": rdef.category,
-                "name": rdef.name,
-                "description": rdef.description,
-                "auth_mode": rdef.auth_mode,
-                "requires": list(rdef.requires),
-                **s,
-            }
-        )
-    return out
-
-
-@app.get("/api/resources/{resource_id}")
-def get_resource(resource_id: str):
-    if resource_id not in CATALOG:
-        raise HTTPException(404, "unknown resource")
-    rdef = CATALOG[resource_id]
-    s = dm.status(resource_id)
+@app.get("/api/kinds")
+def list_kinds():
     return {
-        "id": rdef.id,
-        "category": rdef.category,
-        "name": rdef.name,
-        "description": rdef.description,
-        "auth_mode": rdef.auth_mode,
-        "requires": list(rdef.requires),
-        **s,
+        "kinds": [
+            {
+                "id": k.id,
+                "label": k.label,
+                "description": k.description,
+                "supports_openapi": k.supports_openapi,
+            }
+            for k in KINDS.values()
+        ],
+        "auth_modes": AUTH_MODES,
+        "openapi_versions": OPENAPI_VERSIONS,
     }
 
 
-@app.post("/api/resources/{resource_id}/start")
-def start_resource(resource_id: str):
-    if resource_id not in CATALOG:
-        raise HTTPException(404, "unknown resource")
+@app.get("/api/instances")
+def list_instances():
+    return dm.list_instances()
+
+
+class CreateInstanceRequest(BaseModel):
+    kind: str
+    name: Optional[str] = None
+    auth_mode: str = "none"
+    openapi_version: Optional[str] = None
+    openapi_protect: bool = False
+
+
+@app.post("/api/instances")
+def create_instance(req: CreateInstanceRequest):
+    if req.kind not in KINDS:
+        raise HTTPException(404, f"unknown kind {req.kind!r}")
+    if req.auth_mode not in AUTH_MODES:
+        raise HTTPException(400, f"unknown auth_mode {req.auth_mode!r}")
+
+    config = {"auth_mode": req.auth_mode}
+    if KINDS[req.kind].supports_openapi:
+        config["openapi_version"] = req.openapi_version or "3.1"
+        config["openapi_protect"] = req.openapi_protect
+
     try:
-        return dm.start_resource(resource_id)
+        return dm.create_instance(req.kind, req.name, config)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     except Exception as exc:
         raise HTTPException(500, str(exc))
 
 
-@app.post("/api/resources/{resource_id}/stop")
-def stop_resource(resource_id: str):
-    if resource_id not in CATALOG:
-        raise HTTPException(404, "unknown resource")
-    dependents = [rid for rid, rdef in CATALOG.items() if resource_id in rdef.requires]
-    running_dependents = [rid for rid in dependents if dm.status(rid)["state"] == "running"]
-    if running_dependents:
-        raise HTTPException(
-            409,
-            f"cannot stop {resource_id}: still required by running resources {running_dependents}",
-        )
-    return dm.stop_resource(resource_id)
+@app.get("/api/instances/{instance_id}")
+def get_instance(instance_id: str):
+    detail = dm.instance_detail(instance_id)
+    if detail is None:
+        raise HTTPException(404, "unknown instance")
+    return detail
 
 
-@app.post("/api/resources/{resource_id}/rotate")
-def rotate_resource(resource_id: str):
-    if resource_id not in CATALOG:
-        raise HTTPException(404, "unknown resource")
-    rdef = CATALOG[resource_id]
+@app.delete("/api/instances/{instance_id}")
+def delete_instance(instance_id: str):
+    if dm.instance_detail(instance_id) is None:
+        raise HTTPException(404, "unknown instance")
+    dm.remove_instance(instance_id)
+    return {"ok": True}
+
+
+@app.post("/api/instances/{instance_id}/rotate")
+def rotate_instance(instance_id: str):
+    if dm.instance_detail(instance_id) is None:
+        raise HTTPException(404, "unknown instance")
     try:
-        if rdef.auth_mode == "apikey":
-            return dm.rotate_api_key(resource_id)
-        if rdef.auth_mode == "oauth":
-            return dm.rotate_oauth_client(resource_id)
-        raise HTTPException(400, "resource has no rotatable credential")
+        return dm.rotate_instance(instance_id)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
 
-@app.get("/api/resources/{resource_id}/logs")
-def get_logs(resource_id: str, tail: int = 200):
-    if resource_id not in CATALOG:
-        raise HTTPException(404, "unknown resource")
-    return {"logs": dm.logs(resource_id, tail=tail)}
+@app.get("/api/instances/{instance_id}/logs")
+def get_logs(instance_id: str, tail: int = 200):
+    if dm.instance_detail(instance_id) is None:
+        raise HTTPException(404, "unknown instance")
+    return {"logs": dm.logs(instance_id, tail=tail)}
 
 
-@app.websocket("/api/resources/{resource_id}/logs/stream")
-async def stream_logs_ws(websocket: WebSocket, resource_id: str):
-    if resource_id not in CATALOG:
+@app.websocket("/api/instances/{instance_id}/logs/stream")
+async def stream_logs_ws(websocket: WebSocket, instance_id: str):
+    if dm.instance_detail(instance_id) is None:
         await websocket.close(code=4404)
         return
     await websocket.accept()
     loop = asyncio.get_event_loop()
 
     def _generator():
-        return dm.stream_logs(resource_id)
+        return dm.stream_logs(instance_id)
 
     gen = await loop.run_in_executor(None, _generator)
     try:
@@ -120,6 +123,11 @@ async def stream_logs_ws(websocket: WebSocket, resource_id: str):
             await websocket.send_text(line)
     except WebSocketDisconnect:
         pass
+
+
+@app.get("/api/oauth-provider")
+def oauth_provider_status():
+    return dm.oauth_provider_status()
 
 
 @app.get("/api/health")
