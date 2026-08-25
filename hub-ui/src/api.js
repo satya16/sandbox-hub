@@ -24,6 +24,7 @@ export const createInstance = (payload) =>
   })
 export const deleteInstance = (id) => request(`/instances/${id}`, { method: 'DELETE' })
 export const rotateInstance = (id) => request(`/instances/${id}/rotate`, { method: 'POST' })
+export const updatePort = (id, port) => request(`/instances/${id}/port`, { method: 'PUT', ...jsonBody({ port }) })
 export const getOauthProviderStatus = () => request('/oauth-provider')
 
 export const setChaosConfig = (id, payload) =>

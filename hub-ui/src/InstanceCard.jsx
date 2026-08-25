@@ -29,6 +29,7 @@ import AddIcon from '@mui/icons-material/Add'
 import {
   deleteInstance,
   rotateInstance,
+  updatePort,
   logsSocketUrl,
   setChaosConfig,
   listRoutes,
@@ -103,6 +104,64 @@ function Field({ label, children }) {
       </Typography>{' '}
       {children}
     </Typography>
+  )
+}
+
+function portFromUrl(url) {
+  if (!url) return ''
+  try {
+    return new URL(url).port
+  } catch {
+    return ''
+  }
+}
+
+function PortEditor({ instance, onChanged }) {
+  const currentPort = portFromUrl(instance.url)
+  const [value, setValue] = useState(currentPort)
+  const [updating, setUpdating] = useState(false)
+
+  // Stay in sync with the instance's real port -- including right after a
+  // successful update, at which point there's nothing left to apply and the
+  // button should go back to disabled rather than staying "armed".
+  useEffect(() => {
+    if (!updating) setValue(currentPort)
+  }, [currentPort, updating])
+
+  const changed = value !== '' && String(value) !== String(currentPort)
+  // Disabled for the entire in-flight window: the PUT doesn't resolve until
+  // the recreated container is confirmed live, so "updating" alone already
+  // means "grayed out until the service is live again".
+  const disabled = updating || !changed || instance.state !== 'running'
+
+  const apply = async () => {
+    setUpdating(true)
+    try {
+      await updatePort(instance.id, Number(value))
+      await onChanged()
+      toast.success('port updated')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  return (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <TextField
+        size="small"
+        label="Port"
+        type="number"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        disabled={updating}
+        sx={{ width: 110 }}
+      />
+      <Button size="small" variant="outlined" disabled={disabled} onClick={apply}>
+        {updating ? 'Updating…' : 'Update'}
+      </Button>
+    </Stack>
   )
 }
 
@@ -691,6 +750,8 @@ export default function InstanceCard({ instance, onChanged }) {
               {instance.id}
             </Typography>
           </Stack>
+
+          <PortEditor instance={instance} onChanged={onChanged} />
 
           <AuthDetails instance={instance} />
           <OpenApiDetails instance={instance} />

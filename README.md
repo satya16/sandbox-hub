@@ -67,7 +67,11 @@ token/JWT expiry, rate limits, injected failures), not a mock.
   directly. It talks to the Docker Engine API over `/var/run/docker.sock`
   and creates each instance as a sibling container on a dedicated
   `sandboxhub-net` bridge network, live, on a freshly-allocated host port --
-  no compose file regeneration, no fixed port table to run out of.
+  no compose file regeneration, no fixed port table to run out of. The port
+  is also editable per instance after creation (recreates the container on
+  the new port, credentials/config untouched); the Update button on the
+  card stays disabled for the whole recreate cycle and only re-enables once
+  the instance is confirmed live again.
 - **The resource images** (`resources/rest-api`, `resources/mcp-server`,
   `resources/mock-api`, `resources/webhook-receiver`,
   `resources/chaos-api`, `resources/oauth-provider`) are plain,

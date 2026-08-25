@@ -99,6 +99,24 @@ def rotate_instance(instance_id: str):
         raise HTTPException(400, str(exc))
 
 
+class UpdatePortRequest(BaseModel):
+    port: int
+
+
+@app.put("/api/instances/{instance_id}/port")
+def update_port(instance_id: str, req: UpdatePortRequest):
+    if dm.instance_detail(instance_id) is None:
+        raise HTTPException(404, "unknown instance")
+    if not (1 <= req.port <= 65535):
+        raise HTTPException(400, "port must be between 1 and 65535")
+    try:
+        return dm.update_port(instance_id, req.port)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
 @app.get("/api/instances/{instance_id}/logs")
 def get_logs(instance_id: str, tail: int = 200):
     if dm.instance_detail(instance_id) is None:

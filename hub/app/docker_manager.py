@@ -54,6 +54,16 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _port_is_free(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((BIND_HOST, port))
+            return True
+        except OSError:
+            return False
+
+
 def ensure_network():
     try:
         client.networks.get(NETWORK_NAME)
@@ -442,6 +452,56 @@ def rotate_instance(instance_id: str) -> dict:
     )
     _wait_for_http(_instance_internal_url(instance_id, kind, "/health"))
     if auth_mode == "jwt":
+        _fetch_jwt_token(instance_id, kind)
+    return instance_detail(instance_id)
+
+
+def update_port(instance_id: str, new_port: int) -> dict:
+    container = _get_container(instance_id)
+    if container is None:
+        raise ValueError("instance not found")
+    container.reload()
+    kind = container.labels.get(LABEL_KIND)
+    name = container.labels.get(LABEL_NAME)
+    config = json.loads(container.labels.get(LABEL_CONFIG, "{}"))
+    kdef = KINDS[kind]
+
+    current_port = _host_port(container, kdef.container_port)
+    if new_port == current_port:
+        return instance_detail(instance_id)
+
+    # Check before touching the running container -- if the requested port
+    # is taken, fail without having torn anything down.
+    if not _port_is_free(new_port):
+        raise ValueError(f"port {new_port} is already in use")
+
+    env = _container_env(container)
+    if "PUBLIC_URL" in env:
+        # Baked in at creation for the MCP OAuth resource-server metadata;
+        # stale after a port change unless refreshed here.
+        env["PUBLIC_URL"] = f"http://localhost:{new_port}"
+
+    container.stop(timeout=5)
+    container.remove()
+
+    client.containers.run(
+        kdef.image,
+        name=_container_name(instance_id),
+        detach=True,
+        network=NETWORK_NAME,
+        ports={f"{kdef.container_port}/tcp": (BIND_HOST, new_port)},
+        environment=env,
+        labels={
+            LABEL_MANAGED: "true",
+            LABEL_ROLE: "instance",
+            LABEL_KIND: kind,
+            LABEL_NAME: name,
+            LABEL_CONFIG: json.dumps(config),
+        },
+        restart_policy={"Name": "unless-stopped"},
+    )
+    _wait_for_http(_instance_internal_url(instance_id, kind, "/health"))
+    if config.get("auth_mode") == "jwt":
         _fetch_jwt_token(instance_id, kind)
     return instance_detail(instance_id)
 
