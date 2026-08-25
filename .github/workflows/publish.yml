@@ -1,0 +1,53 @@
+name: Publish images to Docker Hub
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: sandboxhub-hub
+            context: .
+            dockerfile: hub/Dockerfile
+          - image: sandboxhub-rest-api
+            context: resources/rest-api
+            dockerfile: resources/rest-api/Dockerfile
+          - image: sandboxhub-mcp-server
+            context: resources/mcp-server
+            dockerfile: resources/mcp-server/Dockerfile
+          - image: sandboxhub-oauth-provider
+            context: resources/oauth-provider
+            dockerfile: resources/oauth-provider/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: satya16dev/${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

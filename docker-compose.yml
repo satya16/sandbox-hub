@@ -1,0 +1,40 @@
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: hub/Dockerfile
+    image: sandboxhub/hub:latest
+    container_name: sandboxhub-hub
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - SANDBOXHUB_NETWORK=sandboxhub-net
+      - SANDBOXHUB_BIND_HOST=127.0.0.1
+      - OAUTH_ADMIN_TOKEN=dev-admin-token
+    networks:
+      - sandboxhub-net
+    restart: unless-stopped
+
+  # Not started by `docker compose up` (profile is never active) -- these
+  # exist purely so `docker compose build` builds every image the hub needs
+  # before it starts creating containers on demand.
+  rest-api-image:
+    build: ./resources/rest-api
+    image: sandboxhub/rest-api:latest
+    profiles: ["build-only"]
+
+  mcp-server-image:
+    build: ./resources/mcp-server
+    image: sandboxhub/mcp-server:latest
+    profiles: ["build-only"]
+
+  oauth-provider-image:
+    build: ./resources/oauth-provider
+    image: sandboxhub/oauth-provider:latest
+    profiles: ["build-only"]
+
+networks:
+  sandboxhub-net:
+    name: sandboxhub-net
