@@ -76,7 +76,7 @@ token/JWT expiry, rate limits, injected failures), not a mock.
   that kind, however it's configured. Mock API and Chaos API additionally
   expose a small private admin API (`/_routes`, `/_config`) the hub calls
   on your behalf to reconfigure them live, with no restart.
-- **The UI** (`hub-ui/`, React + AntD) is built at image-build time and
+- **The UI** (`hub-ui/`, React + Material UI) is built at image-build time and
   served directly by the hub, so the whole thing is one container and one
   URL: `http://localhost:8090`.
 - All published ports bind to `127.0.0.1` by default (`SANDBOXHUB_BIND_HOST`
