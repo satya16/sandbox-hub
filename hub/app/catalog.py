@@ -29,7 +29,7 @@ KINDS: dict[str, KindDef] = {
             id="rest-api",
             label="REST API",
             description="A small sample REST API (/items).",
-            image="sandboxhub/rest-api:latest",
+            image="satya16dev/sandboxhub-rest-api:latest",
             container_port=8000,
             supports_openapi=True,
         ),
@@ -37,14 +37,14 @@ KINDS: dict[str, KindDef] = {
             id="mcp-server",
             label="MCP Server",
             description="A small sample MCP server (streamable-http) with echo/add/current_time tools.",
-            image="sandboxhub/mcp-server:latest",
+            image="satya16dev/sandboxhub-mcp-server:latest",
             container_port=8000,
         ),
         KindDef(
             id="mock-api",
             label="Mock API",
             description="Define your own routes: method + path (or * for catch-all), status, and a templated JSON response.",
-            image="sandboxhub/mock-api:latest",
+            image="satya16dev/sandboxhub-mock-api:latest",
             container_port=8000,
             supports_routes=True,
         ),
@@ -52,14 +52,14 @@ KINDS: dict[str, KindDef] = {
             id="webhook-receiver",
             label="Webhook Receiver",
             description="Accepts any request at any path, logs it live, and always responds 200 -- point a webhook sender at it and watch payloads arrive.",
-            image="sandboxhub/webhook-receiver:latest",
+            image="satya16dev/sandboxhub-webhook-receiver:latest",
             container_port=8000,
         ),
         KindDef(
             id="chaos-api",
             label="Rate Limit / Chaos API",
             description="A single test endpoint you can put into rate-limiting mode (429s) or chaos mode (pick the status/body/latency/failure rate).",
-            image="sandboxhub/chaos-api:latest",
+            image="satya16dev/sandboxhub-chaos-api:latest",
             container_port=8000,
             supports_auth=False,
             supports_chaos_config=True,
@@ -68,7 +68,7 @@ KINDS: dict[str, KindDef] = {
             id="api-tester",
             label="API Tester",
             description="A minimal, ephemeral REST client (like a tiny Postman) -- send one-off requests to any local URL, or poll one on an interval and check each response against an expected status / body-contains rule. Nothing is saved.",
-            image="sandboxhub/api-tester:latest",
+            image="satya16dev/sandboxhub-api-tester:latest",
             container_port=8000,
             supports_auth=False,
             has_own_ui=True,
@@ -79,7 +79,7 @@ KINDS: dict[str, KindDef] = {
 AUTH_MODES = ["none", "apikey", "basic", "jwt", "session", "oauth"]
 OPENAPI_VERSIONS = ["3.0", "3.1"]
 
-OAUTH_PROVIDER_IMAGE = "sandboxhub/oauth-provider:latest"
+OAUTH_PROVIDER_IMAGE = "satya16dev/sandboxhub-oauth-provider:latest"
 OAUTH_PROVIDER_CONTAINER_PORT = 8000
 
 # Shared secret the hub uses to call the private admin endpoints it creates
