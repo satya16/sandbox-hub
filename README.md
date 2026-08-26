@@ -113,13 +113,37 @@ token/JWT expiry, rate limits, injected failures), not a mock.
 
 Requires Docker.
 
+### Prebuilt image (no clone needed)
+
 ```sh
-./setup.sh
+docker run -d --name sandboxhub-hub \
+  -p 8090:8090 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e SANDBOXHUB_BIND_HOST=0.0.0.0 \
+  satya16dev/sandboxhub-hub
 ```
+
+That's the only image you pull yourself. The hub creates every resource
+(`rest-api`, `mcp-server`, `mock-api`, `webhook-receiver`, `chaos-api`,
+`api-tester`, `oauth-provider`) as a sibling container on demand, and Docker
+auto-pulls each one from `satya16dev/sandboxhub-<kind>` the first time you
+actually use that kind -- you never pull the other seven by hand.
+
+`SANDBOXHUB_BIND_HOST=0.0.0.0` is required here: the default (`127.0.0.1`)
+binds resource ports to the hub *container's* own loopback, which is
+unreachable from your host. And note the Docker socket mount gives the
+container root-equivalent access to your machine -- that's inherent to how
+the hub creates sibling containers, not incidental.
 
 Then open **http://localhost:8090**, click **New**, and configure whatever
 you need. Copy the generated URL / key / curl snippet into whatever you're
 testing.
+
+### From source
+
+```sh
+./setup.sh
+```
 
 Manual equivalent:
 
@@ -138,8 +162,6 @@ npm run dev       # http://localhost:5173, proxies /api to the hub on :8090
 
 ## Roadmap ideas
 
-- Publish prebuilt images to Docker Hub (`satya16dev/sandbox-hub-*`) so
-  `docker run` works without cloning.
 - A realistic IdP option (Keycloak and/or Dex) alongside the built-in
   minimal OAuth provider, for testing against something closer to what
   you'd integrate with in production.
