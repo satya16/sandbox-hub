@@ -142,6 +142,11 @@ Then open **http://localhost:8090**, click **New**, and configure whatever
 you need. Copy the generated URL / key / curl snippet into whatever you're
 testing.
 
+Already have a `sandboxhub-hub` container from a previous run? `docker run
+--name` fails if that name exists, even stopped. Either resume it
+(`docker start sandboxhub-hub`) or remove it first
+(`docker rm -f sandboxhub-hub`) before rerunning the command above.
+
 ### From source
 
 ```sh
