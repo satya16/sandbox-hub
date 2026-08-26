@@ -32,6 +32,7 @@ def list_kinds():
                 "supports_auth": k.supports_auth,
                 "supports_chaos_config": k.supports_chaos_config,
                 "supports_routes": k.supports_routes,
+                "has_own_ui": k.has_own_ui,
             }
             for k in KINDS.values()
         ],

@@ -1,10 +1,11 @@
 # sandbox-hub
 
 A local control panel for spinning up disposable test resources -- REST
-APIs, MCP servers, mock endpoints, webhook receivers, and a chaos/rate-limit
-sandbox -- as Docker containers, each with its own auth setup, from one
-page. Click **New**, pick what to run and how it should be secured, hit
-**Start**. Run as many at once as you like, in any mix of configs.
+APIs, MCP servers, mock endpoints, webhook receivers, a chaos/rate-limit
+sandbox, and a minimal API tester -- as Docker containers, each with its own
+auth setup, from one page. Click **New**, pick what to run and how it
+should be secured, hit **Start**. Run as many at once as you like, in any
+mix of configs.
 
 Useful when you're building a client (an app, an agent, an MCP client) and
 need something real to point it at without standing up infrastructure or
@@ -12,7 +13,7 @@ depending on a live third-party service.
 
 ## What it gives you
 
-Five kinds of resource, each configurable per instance:
+Six kinds of resource, each configurable per instance:
 
 - **REST API** -- a small sample API (`/items`). Also serves its own
   **OpenAPI spec** (`/openapi.json`, version 3.0 or 3.1 -- your choice) plus
@@ -34,6 +35,17 @@ Five kinds of resource, each configurable per instance:
   live from the card: **normal** (always 200), **rate limit** (N requests
   per window, then 429 + `Retry-After`), or **chaos** (pick the exact
   status code, JSON body, injected latency, and a random-failure rate).
+- **API Tester** -- a minimal, ephemeral REST client (like a tiny
+  Postman/Bruno). Send one-off requests to any URL, or set it polling one on
+  an interval and checking each response against an expected status /
+  body-contains rule -- pass/fail results stream live to the card's log
+  panel. Runs entirely server-side inside its own container (so polling
+  keeps going whether or not the page is open, and there's no CORS
+  dependency on the target), and gets its own full-page UI -- the card just
+  links to it. Nothing is saved; it forgets everything on restart. To reach
+  another sandbox-hub instance from here, use that instance's **Internal
+  URL** (shown on its card) rather than its `localhost:PORT` one -- from
+  inside a container, `localhost` means itself, not your machine.
 
 All auth-capable kinds (REST API, MCP server, Mock API, Webhook Receiver)
 support the same auth modes: **none**, **static API key**, **HTTP Basic**,
@@ -74,12 +86,15 @@ token/JWT expiry, rate limits, injected failures), not a mock.
   the instance is confirmed live again.
 - **The resource images** (`resources/rest-api`, `resources/mcp-server`,
   `resources/mock-api`, `resources/webhook-receiver`,
-  `resources/chaos-api`, `resources/oauth-provider`) are plain,
-  hub-agnostic images. Each is parameterized entirely by env vars
+  `resources/chaos-api`, `resources/api-tester`, `resources/oauth-provider`)
+  are plain, hub-agnostic images. Each is parameterized entirely by env vars
   (`AUTH_MODE`, `OPENAPI_VERSION`, ...) so one image backs every instance of
   that kind, however it's configured. Mock API and Chaos API additionally
   expose a small private admin API (`/_routes`, `/_config`) the hub calls
-  on your behalf to reconfigure them live, with no restart.
+  on your behalf to reconfigure them live, with no restart. API Tester is
+  the one kind with its own full page (linked from its card) instead of
+  being driven through the hub's UI -- it's a self-contained tool, not
+  something the hub needs to configure.
 - **The UI** (`hub-ui/`, React + Material UI) is built at image-build time and
   served directly by the hub, so the whole thing is one container and one
   URL: `http://localhost:8090`.

@@ -344,6 +344,11 @@ def instance_detail(instance_id: str) -> Optional[dict]:
 
     port = _host_port(container, kdef.container_port) if kdef else None
     url = f"http://localhost:{port}" if port else None
+    # "localhost" here means the *developer's* machine -- unreachable from
+    # inside another sandbox-hub container (e.g. the API Tester), since
+    # published ports are bound to 127.0.0.1 on purpose. Containers reach
+    # each other over the shared Docker network by container name instead.
+    internal_url = _internal_url(_container_name(instance_id), kdef.container_port, "") if kdef else None
 
     detail = {
         "id": instance_id,
@@ -351,6 +356,7 @@ def instance_detail(instance_id: str) -> Optional[dict]:
         "name": name,
         "state": container.status,
         "url": url,
+        "internal_url": internal_url,
         "created_at": container.attrs.get("Created"),
         "auth": _describe_auth(config.get("auth_mode", "none"), instance_id, kind, env, url),
     }

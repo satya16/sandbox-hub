@@ -26,6 +26,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import DeleteIcon from '@mui/icons-material/Delete'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import AddIcon from '@mui/icons-material/Add'
+import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import {
   deleteInstance,
   rotateInstance,
@@ -55,6 +56,7 @@ const KIND_LABEL = {
   'mock-api': 'Mock API',
   'webhook-receiver': 'Webhook Receiver',
   'chaos-api': 'Rate Limit / Chaos API',
+  'api-tester': 'API Tester',
 }
 
 function Code({ text, sx }) {
@@ -682,9 +684,12 @@ function DeleteConfirmButton({ onConfirm, loading }) {
   )
 }
 
-export default function InstanceCard({ instance, onChanged }) {
+export default function InstanceCard({ instance, kinds, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [openPanel, setOpenPanel] = useState(null)
+
+  const kindDef = kinds?.find((k) => k.id === instance.kind)
+  const hasOwnUi = kindDef?.has_own_ui
 
   const canRotate =
     ['apikey', 'basic', 'jwt', 'session', 'oauth'].includes(instance.auth?.mode) || instance.openapi?.protected
@@ -753,8 +758,30 @@ export default function InstanceCard({ instance, onChanged }) {
 
           <PortEditor instance={instance} onChanged={onChanged} />
 
-          <AuthDetails instance={instance} />
-          <OpenApiDetails instance={instance} />
+          {instance.internal_url && (
+            <Field label="Internal URL (for other sandbox-hub containers, e.g. the API Tester)">
+              <Code text={instance.internal_url} />
+            </Field>
+          )}
+
+          {hasOwnUi ? (
+            <Button
+              variant="contained"
+              startIcon={<OpenInNewIcon />}
+              component="a"
+              href={instance.url}
+              target="_blank"
+              rel="noopener"
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              Open API Tester
+            </Button>
+          ) : (
+            <>
+              <AuthDetails instance={instance} />
+              <OpenApiDetails instance={instance} />
+            </>
+          )}
 
           {canRotate && (
             <Button size="small" startIcon={<RefreshIcon />} onClick={rotate} disabled={busy} sx={{ alignSelf: 'flex-start' }}>

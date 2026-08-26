@@ -103,7 +103,7 @@ function App() {
         <Grid container spacing={2}>
           {(instances || []).map((inst) => (
             <Grid key={inst.id} size={{ xs: 12, md: 6 }}>
-              <InstanceCard instance={inst} onChanged={refresh} />
+              <InstanceCard instance={inst} kinds={kinds} onChanged={refresh} />
             </Grid>
           ))}
         </Grid>

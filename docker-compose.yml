@@ -52,6 +52,11 @@ services:
     image: sandboxhub/chaos-api:latest
     profiles: ["build-only"]
 
+  api-tester-image:
+    build: ./resources/api-tester
+    image: sandboxhub/api-tester:latest
+    profiles: ["build-only"]
+
 networks:
   sandboxhub-net:
     name: sandboxhub-net

@@ -33,6 +33,9 @@ jobs:
           - image: sandboxhub-chaos-api
             context: resources/chaos-api
             dockerfile: resources/chaos-api/Dockerfile
+          - image: sandboxhub-api-tester
+            context: resources/api-tester
+            dockerfile: resources/api-tester/Dockerfile
     steps:
       - uses: actions/checkout@v4
 

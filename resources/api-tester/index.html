@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>sandbox-hub API tester</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f5f5f5;
+    color: #222;
+  }
+  header {
+    background: #0a0f1e;
+    color: #fff;
+    padding: 14px 24px;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header p { margin: 2px 0 0; font-size: 13px; color: rgba(255,255,255,0.65); }
+  main { max-width: 900px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+  section {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+  }
+  h2 { font-size: 15px; margin: 0 0 14px; }
+  .row { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
+  .row.wrap { flex-wrap: wrap; }
+  select, input[type=text], input[type=number], textarea {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 7px 9px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+  }
+  input[type=text], textarea { flex: 1; }
+  textarea { width: 100%; min-height: 80px; font-family: ui-monospace, monospace; resize: vertical; }
+  button {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 5px;
+    background: #1565c0;
+    color: #fff;
+    cursor: pointer;
+  }
+  button.secondary { background: #eee; color: #333; }
+  button.danger { background: #c62828; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  label { font-size: 12px; color: #666; display: block; margin-bottom: 3px; }
+  .field { display: flex; flex-direction: column; }
+  .headers-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+  .header-row { display: flex; gap: 6px; }
+  .header-row input { flex: 1; }
+  code, pre {
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+  }
+  pre {
+    background: #f5f5f5;
+    padding: 10px;
+    border-radius: 5px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .status-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-weight: 600; font-size: 12px; }
+  .status-2xx { background: #e6f4ea; color: #1e7e34; }
+  .status-4xx, .status-5xx { background: #fdecea; color: #c62828; }
+  .status-err { background: #fdecea; color: #c62828; }
+  .pass { color: #1e7e34; font-weight: 600; }
+  .fail { color: #c62828; font-weight: 600; }
+  .muted { color: #888; font-size: 12px; }
+  .poll-result { border-bottom: 1px solid #eee; padding: 8px 0; font-size: 13px; }
+  .poll-result:last-child { border-bottom: none; }
+  #response-panel { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>sandbox-hub API tester</h1>
+  <p>Minimal, ephemeral -- nothing here is saved. Send a request, or poll one on an interval.</p>
+  <p><b>This runs in its own container.</b> To reach another sandbox-hub instance, use its
+  <b>Internal URL</b> (shown on its card, e.g. <code>http://sandboxhub-rest-api-abc123:8000/items</code>)
+  -- not its <code>localhost:PORT</code> URL, which only your own machine can reach.</p>
+</header>
+<main>
+  <section>
+    <h2>Request</h2>
+    <div class="row">
+      <select id="method">
+        <option>GET</option>
+        <option>POST</option>
+        <option>PUT</option>
+        <option>PATCH</option>
+        <option>DELETE</option>
+      </select>
+      <input type="text" id="url" placeholder="http://sandboxhub-<name>:8000/path" />
+      <button id="send-btn" onclick="sendRequest()">Send</button>
+    </div>
+
+    <label>Headers</label>
+    <div class="headers-list" id="headers-list"></div>
+    <button class="secondary small" onclick="addHeaderRow()">+ Add header</button>
+
+    <div style="margin-top: 14px;">
+      <label>Body</label>
+      <textarea id="body" placeholder='{"key": "value"}'></textarea>
+    </div>
+
+    <div id="response-panel" style="margin-top: 18px;">
+      <h2>Response</h2>
+      <div class="row">
+        <span id="resp-status" class="status-badge"></span>
+        <span id="resp-time" class="muted"></span>
+      </div>
+      <pre id="resp-body"></pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>Poll this request</h2>
+    <div class="row wrap">
+      <div class="field">
+        <label>Every (seconds)</label>
+        <input type="number" id="interval" value="5" min="1" style="width: 90px;" />
+      </div>
+      <div class="field">
+        <label>Expect status (optional)</label>
+        <input type="number" id="expect-status" placeholder="200" style="width: 100px;" />
+      </div>
+      <div class="field" style="flex: 1;">
+        <label>Expect body contains (optional)</label>
+        <input type="text" id="expect-contains" placeholder="substring to look for" />
+      </div>
+    </div>
+    <div class="row">
+      <button id="poll-start-btn" onclick="startPoll()">Start polling</button>
+      <button id="poll-stop-btn" class="danger" onclick="stopPoll()" disabled>Stop</button>
+      <span id="poll-status" class="muted"></span>
+    </div>
+    <div id="poll-results"></div>
+  </section>
+</main>
+
+<script>
+let headerRowId = 0;
+
+function addHeaderRow(key = '', value = '') {
+  const list = document.getElementById('headers-list');
+  const id = headerRowId++;
+  const row = document.createElement('div');
+  row.className = 'header-row';
+  row.id = `header-row-${id}`;
+  row.innerHTML = `
+    <input type="text" placeholder="Header name" value="${key}" data-role="key" />
+    <input type="text" placeholder="Header value" value="${value}" data-role="value" />
+    <button class="secondary small" onclick="document.getElementById('header-row-${id}').remove()">x</button>
+  `;
+  list.appendChild(row);
+}
+addHeaderRow('Content-Type', 'application/json');
+
+function collectHeaders() {
+  const headers = {};
+  document.querySelectorAll('.header-row').forEach((row) => {
+    const key = row.querySelector('[data-role=key]').value.trim();
+    const value = row.querySelector('[data-role=value]').value;
+    if (key) headers[key] = value;
+  });
+  return headers;
+}
+
+function currentRequest() {
+  return {
+    method: document.getElementById('method').value,
+    url: document.getElementById('url').value.trim(),
+    headers: collectHeaders(),
+    body: document.getElementById('body').value || null,
+  };
+}
+
+function statusClass(status) {
+  if (status == null) return 'status-err';
+  if (status < 300) return 'status-2xx';
+  if (status < 500) return 'status-4xx';
+  return 'status-5xx';
+}
+
+async function sendRequest() {
+  const req = currentRequest();
+  if (!req.url) { alert('Enter a URL'); return; }
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    const resp = await fetch('/api/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    const data = await resp.json();
+    document.getElementById('response-panel').style.display = 'block';
+    const statusEl = document.getElementById('resp-status');
+    statusEl.className = 'status-badge ' + statusClass(data.status);
+    statusEl.textContent = data.ok ? data.status : `error: ${data.error}`;
+    document.getElementById('resp-time').textContent = `${data.elapsed_ms} ms`;
+    let bodyText = data.body || '';
+    try { bodyText = JSON.stringify(JSON.parse(bodyText), null, 2); } catch {}
+    document.getElementById('resp-body').textContent = bodyText;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+}
+
+let pollTimer = null;
+
+async function startPoll() {
+  const req = currentRequest();
+  if (!req.url) { alert('Enter a URL'); return; }
+  const payload = {
+    ...req,
+    interval_seconds: Number(document.getElementById('interval').value) || 5,
+    expect_status: document.getElementById('expect-status').value
+      ? Number(document.getElementById('expect-status').value)
+      : null,
+    expect_body_contains: document.getElementById('expect-contains').value || null,
+  };
+  await fetch('/api/poll/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  refreshPollStatus();
+  if (!pollTimer) pollTimer = setInterval(refreshPollStatus, 2000);
+}
+
+async function stopPoll() {
+  await fetch('/api/poll/stop', { method: 'POST' });
+  refreshPollStatus();
+}
+
+function renderPollResults(results) {
+  const el = document.getElementById('poll-results');
+  if (results.length === 0) {
+    el.innerHTML = '<p class="muted">No results yet.</p>';
+    return;
+  }
+  el.innerHTML = results
+    .map((r) => {
+      const time = new Date(r.at * 1000).toLocaleTimeString();
+      const label = r.passed ? '<span class="pass">PASS</span>' : '<span class="fail">FAIL</span>';
+      const detail = r.error ? r.error : `status ${r.status}, ${r.elapsed_ms} ms`;
+      return `<div class="poll-result">${label} <span class="muted">${time}</span> -- ${detail}</div>`;
+    })
+    .join('');
+}
+
+async function refreshPollStatus() {
+  const resp = await fetch('/api/poll/status');
+  const data = await resp.json();
+  document.getElementById('poll-start-btn').disabled = data.running;
+  document.getElementById('poll-stop-btn').disabled = !data.running;
+  document.getElementById('poll-status').textContent = data.running
+    ? `polling every ${data.config.interval_seconds}s`
+    : '';
+  renderPollResults(data.results);
+  if (!data.running && pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+refreshPollStatus();
+</script>
+</body>
+</html>

@@ -19,6 +19,7 @@ class KindDef:
     supports_auth: bool = True
     supports_chaos_config: bool = False
     supports_routes: bool = False
+    has_own_ui: bool = False
 
 
 KINDS: dict[str, KindDef] = {
@@ -62,6 +63,15 @@ KINDS: dict[str, KindDef] = {
             container_port=8000,
             supports_auth=False,
             supports_chaos_config=True,
+        ),
+        KindDef(
+            id="api-tester",
+            label="API Tester",
+            description="A minimal, ephemeral REST client (like a tiny Postman) -- send one-off requests to any local URL, or poll one on an interval and check each response against an expected status / body-contains rule. Nothing is saved.",
+            image="sandboxhub/api-tester:latest",
+            container_port=8000,
+            supports_auth=False,
+            has_own_ui=True,
         ),
     ]
 }
