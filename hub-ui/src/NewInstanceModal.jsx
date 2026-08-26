@@ -24,7 +24,15 @@ const AUTH_LABELS = {
   oauth: 'OAuth2',
 }
 
-const EMPTY_FORM = { kind: '', name: '', auth_mode: 'none', openapi_version: '3.1', openapi_protect: false }
+const EMPTY_FORM = {
+  kind: '',
+  name: '',
+  auth_mode: 'none',
+  openapi_version: '3.1',
+  openapi_protect: false,
+  async_jobs: false,
+  async_job_delay_seconds: 5,
+}
 
 export default function NewInstanceModal({ open, kinds, authModes, onClose, onCreated }) {
   const [values, setValues] = useState(EMPTY_FORM)
@@ -52,6 +60,10 @@ export default function NewInstanceModal({ open, kinds, authModes, onClose, onCr
       if (kind?.supports_openapi) {
         payload.openapi_version = values.openapi_version
         payload.openapi_protect = values.openapi_protect
+      }
+      if (kind?.supports_async_job) {
+        payload.async_jobs = values.async_jobs
+        if (values.async_jobs) payload.async_job_delay_seconds = Number(values.async_job_delay_seconds)
       }
       await createInstance(payload)
       toast.success('started')
@@ -118,6 +130,23 @@ export default function NewInstanceModal({ open, kinds, authModes, onClose, onCr
                     control={<Switch checked={values.openapi_protect} onChange={set('openapi_protect')} />}
                     label="Protect the OpenAPI spec / docs behind a static token"
                   />
+                </>
+              )}
+
+              {kind.supports_async_job && (
+                <>
+                  <FormControlLabel
+                    control={<Switch checked={values.async_jobs} onChange={set('async_jobs')} />}
+                    label="Enable async job endpoint (POST /jobs, GET /jobs/{id})"
+                  />
+                  {values.async_jobs && (
+                    <TextField
+                      label="Job delay (seconds)"
+                      type="number"
+                      value={values.async_job_delay_seconds}
+                      onChange={set('async_job_delay_seconds')}
+                    />
+                  )}
                 </>
               )}
             </>

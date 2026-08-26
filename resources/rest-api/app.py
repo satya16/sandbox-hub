@@ -18,11 +18,18 @@ AUTH_MODE=oauth   -> those require header  Authorization: Bearer <token>,
 OPENAPI_VERSION=3.0|3.1  -> version declared in the served openapi.json (default 3.1)
 OPENAPI_PROTECT=true     -> /openapi.json, /docs, /redoc require
                              X-API-Key: <OPENAPI_TOKEN>, independent of AUTH_MODE
+
+ASYNC_JOBS=true              -> enables POST /jobs (submit, 202 + job_id) and
+                                 GET /jobs/{id} (polls "pending" -> "done"),
+                                 gated by the same AUTH_MODE as /items
+ASYNC_JOB_DELAY_SECONDS=N    -> how long a job stays "pending" before it
+                                 resolves to "done" (default 5)
 """
 import base64
 import os
 import secrets
 import time
+import uuid
 
 import httpx
 import jwt as pyjwt
@@ -46,6 +53,9 @@ OPENAPI_VERSION_STRING = "3.0.2" if OPENAPI_VERSION.startswith("3.0") else "3.1.
 OPENAPI_PROTECT = os.environ.get("OPENAPI_PROTECT", "false").lower() == "true"
 OPENAPI_TOKEN = os.environ.get("OPENAPI_TOKEN", "")
 
+ASYNC_JOBS = os.environ.get("ASYNC_JOBS", "false").lower() == "true"
+ASYNC_JOB_DELAY_SECONDS = float(os.environ.get("ASYNC_JOB_DELAY_SECONDS", "5"))
+
 SESSION_COOKIE = "sandboxhub_session"
 _active_sessions: set[str] = set()
 
@@ -62,6 +72,10 @@ _items = {
     1: {"id": 1, "name": "widget"},
     2: {"id": 2, "name": "gadget"},
 }
+
+# job_id -> {submitted_at, payload} -- status is derived from elapsed time at
+# read time rather than stored, so no background worker is needed.
+_jobs: dict[str, dict] = {}
 
 
 def _mint_jwt() -> str:
@@ -198,6 +212,27 @@ def create_item(name: str, auth=Depends(require_auth)):
     new_id = max(_items) + 1
     _items[new_id] = {"id": new_id, "name": name}
     return _items[new_id]
+
+
+@app.post("/jobs", status_code=202)
+def submit_job(payload: dict, auth=Depends(require_auth)):
+    if not ASYNC_JOBS:
+        raise HTTPException(404, "not found")
+    job_id = uuid.uuid4().hex
+    _jobs[job_id] = {"submitted_at": time.time(), "payload": payload}
+    return {"job_id": job_id, "status": "pending", "poll_url": f"/jobs/{job_id}"}
+
+
+@app.get("/jobs/{job_id}")
+def get_job(job_id: str, auth=Depends(require_auth)):
+    if not ASYNC_JOBS:
+        raise HTTPException(404, "not found")
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if time.time() - job["submitted_at"] < ASYNC_JOB_DELAY_SECONDS:
+        return {"job_id": job_id, "status": "pending"}
+    return {"job_id": job_id, "status": "done", "result": {"echoed": job["payload"]}}
 
 
 @app.get("/openapi.json", include_in_schema=False)

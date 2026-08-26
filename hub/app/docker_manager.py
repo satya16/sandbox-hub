@@ -215,6 +215,9 @@ def _build_env(kind: str, config: dict) -> dict:
         if config.get("openapi_protect"):
             env["OPENAPI_PROTECT"] = "true"
             env["OPENAPI_TOKEN"] = secrets.token_urlsafe(18)
+        if config.get("async_jobs"):
+            env["ASYNC_JOBS"] = "true"
+            env["ASYNC_JOB_DELAY_SECONDS"] = str(config.get("async_job_delay_seconds", 5))
 
     if auth_mode == "apikey":
         env["API_KEY"] = secrets.token_urlsafe(18)
@@ -372,6 +375,13 @@ def instance_detail(instance_id: str) -> Optional[dict]:
         if openapi["protected"]:
             openapi["auth"] = {"header": "X-API-Key", "token": env.get("OPENAPI_TOKEN")}
         detail["openapi"] = openapi
+
+        if config.get("async_jobs"):
+            detail["async_jobs"] = {
+                "delay_seconds": config.get("async_job_delay_seconds", 5),
+                "submit_url": f"{url}/jobs" if url else None,
+                "poll_url_template": f"{url}/jobs/{{job_id}}" if url else None,
+            }
 
     if kind == "chaos-api" and container.status == "running":
         try:

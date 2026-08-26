@@ -29,6 +29,7 @@ def list_kinds():
                 "label": k.label,
                 "description": k.description,
                 "supports_openapi": k.supports_openapi,
+                "supports_async_job": k.supports_async_job,
                 "supports_auth": k.supports_auth,
                 "supports_chaos_config": k.supports_chaos_config,
                 "supports_routes": k.supports_routes,
@@ -52,6 +53,8 @@ class CreateInstanceRequest(BaseModel):
     auth_mode: str = "none"
     openapi_version: Optional[str] = None
     openapi_protect: bool = False
+    async_jobs: bool = False
+    async_job_delay_seconds: int = 5
 
 
 @app.post("/api/instances")
@@ -65,6 +68,9 @@ def create_instance(req: CreateInstanceRequest):
     if KINDS[req.kind].supports_openapi:
         config["openapi_version"] = req.openapi_version or "3.1"
         config["openapi_protect"] = req.openapi_protect
+    if KINDS[req.kind].supports_async_job:
+        config["async_jobs"] = req.async_jobs
+        config["async_job_delay_seconds"] = req.async_job_delay_seconds
 
     try:
         return dm.create_instance(req.kind, req.name, config)

@@ -305,6 +305,23 @@ function OpenApiDetails({ instance }) {
   )
 }
 
+function AsyncJobDetails({ instance }) {
+  const jobs = instance.async_jobs
+  if (!jobs) return null
+  return (
+    <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid #f0f0f0' }}>
+      <Typography variant="subtitle2">Async jobs ({jobs.delay_seconds}s delay)</Typography>
+      <Field label="Submit">
+        <Code text={`POST ${jobs.submit_url}`} />
+      </Field>
+      <Field label="Poll">
+        <Code text={`GET ${jobs.poll_url_template}`} />
+      </Field>
+      <Snippet text={`curl -X POST ${jobs.submit_url} -d '{"hello":"world"}'`} />
+    </Box>
+  )
+}
+
 function ChaosPanel({ instance, onChanged }) {
   const chaos = instance.chaos
   const [mode, setMode] = useState(chaos?.mode ?? 'normal')
@@ -780,6 +797,7 @@ export default function InstanceCard({ instance, kinds, onChanged }) {
             <>
               <AuthDetails instance={instance} />
               <OpenApiDetails instance={instance} />
+              <AsyncJobDetails instance={instance} />
             </>
           )}
 

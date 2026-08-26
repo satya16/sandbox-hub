@@ -16,6 +16,7 @@ class KindDef:
     image: str
     container_port: int
     supports_openapi: bool = False
+    supports_async_job: bool = False
     supports_auth: bool = True
     supports_chaos_config: bool = False
     supports_routes: bool = False
@@ -32,6 +33,7 @@ KINDS: dict[str, KindDef] = {
             image="satya16dev/sandboxhub-rest-api:latest",
             container_port=8000,
             supports_openapi=True,
+            supports_async_job=True,
         ),
         KindDef(
             id="mcp-server",

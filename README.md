@@ -19,7 +19,11 @@ Six kinds of resource, each configurable per instance:
   **OpenAPI spec** (`/openapi.json`, version 3.0 or 3.1 -- your choice) plus
   **Swagger UI** (`/docs`) and **ReDoc** (`/redoc`), with the spec/docs
   optionally gated behind their own static token, independent of whatever
-  protects `/items`.
+  protects `/items`. Optionally exposes an **async job endpoint**
+  (`POST /jobs` -> `202` + a job id, `GET /jobs/{id}` polling
+  `"pending"` -> `"done"` after a configurable delay) for testing client
+  code against the submit-then-poll pattern real async APIs use --
+  gated by whatever auth mode the instance is using, same as `/items`.
 - **MCP server** (streamable-http) -- `echo` / `add` / `current_time` tools.
 - **Mock API** -- define your own routes after starting it: method + path
   (or `*` for "any"/catch-all) mapped to a status code and a **templated
