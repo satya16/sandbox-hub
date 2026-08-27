@@ -171,20 +171,33 @@ function buildSnippet(instance) {
   const { kind, auth, url } = instance
   if (!auth || !url) return null
   const target = `${url}${PATH_SUFFIX[kind] || ''}`
+  // rest-api's /items also accepts POST ?name=... to add an item -- append
+  // that example using whichever auth args the read command above used.
+  const postCmd = (authArgs = '') =>
+    kind === 'rest-api' ? `\ncurl ${authArgs}-X POST "${target}?name=myitem"` : ''
 
-  if (auth.mode === 'none') return `curl ${target}`
-  if (auth.mode === 'apikey') return `curl -H "X-API-Key: ${auth.api_key}" ${target}`
-  if (auth.mode === 'basic') return `curl -u ${auth.username}:${auth.password} ${target}`
-  if (auth.mode === 'jwt') return `curl -H "Authorization: Bearer ${auth.token}" ${target}`
+  if (auth.mode === 'none') return `curl ${target}${postCmd()}`
+  if (auth.mode === 'apikey') {
+    const args = `-H "X-API-Key: ${auth.api_key}" `
+    return `curl ${args}${target}${postCmd(args)}`
+  }
+  if (auth.mode === 'basic') {
+    const args = `-u ${auth.username}:${auth.password} `
+    return `curl ${args}${target}${postCmd(args)}`
+  }
+  if (auth.mode === 'jwt') {
+    const args = `-H "Authorization: Bearer ${auth.token}" `
+    return `curl ${args}${target}${postCmd(args)}`
+  }
   if (auth.mode === 'session') {
     const loginCmd = `curl -s -c cookies.txt -X POST ${auth.login_url} \\\n  -H "Content-Type: application/json" -d '{"username":"${auth.username}","password":"${auth.password}"}'`
     const useCmd = `curl -b cookies.txt ${target}`
-    return `${loginCmd}\n${useCmd}`
+    return `${loginCmd}\n${useCmd}${postCmd('-b cookies.txt ')}`
   }
   if (auth.mode === 'oauth') {
     const tokenCmd = `TOKEN=$(curl -s -X POST ${auth.token_endpoint} \\\n  -d "grant_type=client_credentials&client_id=${auth.client_id}&client_secret=${auth.client_secret}" \\\n  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")`
     const useCmd = `curl -H "Authorization: Bearer $TOKEN" ${target}`
-    return `${tokenCmd}\n${useCmd}`
+    return `${tokenCmd}\n${useCmd}${postCmd('-H "Authorization: Bearer $TOKEN" ')}`
   }
   return null
 }

@@ -29,7 +29,7 @@ KINDS: dict[str, KindDef] = {
         KindDef(
             id="rest-api",
             label="REST API",
-            description="A small sample REST API (/items).",
+            description="A small sample REST API. GET /items lists the sample data; POST /items?name=... adds your own.",
             image="satya16dev/sandboxhub-rest-api:latest",
             container_port=8000,
             supports_openapi=True,
