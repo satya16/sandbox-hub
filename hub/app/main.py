@@ -33,6 +33,7 @@ def list_kinds():
                 "supports_auth": k.supports_auth,
                 "supports_chaos_config": k.supports_chaos_config,
                 "supports_routes": k.supports_routes,
+                "supports_graphql_schema": k.supports_graphql_schema,
                 "has_own_ui": k.has_own_ui,
             }
             for k in KINDS.values()
@@ -229,6 +230,71 @@ def remove_all_routes(instance_id: str):
     if detail is None:
         raise HTTPException(404, "unknown instance")
     dm.clear_routes(instance_id)
+    return {"ok": True}
+
+
+# ----------------------------------------------------------------- graphql-api
+
+
+def _require_graphql_instance(instance_id: str) -> dict:
+    detail = dm.instance_detail(instance_id)
+    if detail is None:
+        raise HTTPException(404, "unknown instance")
+    if detail["kind"] != "graphql-api":
+        raise HTTPException(400, "not a graphql-api instance")
+    return detail
+
+
+class GraphQLSchemaRequest(BaseModel):
+    sdl: str
+
+
+@app.get("/api/instances/{instance_id}/graphql/schema")
+def get_graphql_schema(instance_id: str):
+    _require_graphql_instance(instance_id)
+    return dm.get_graphql_schema(instance_id)
+
+
+@app.put("/api/instances/{instance_id}/graphql/schema")
+def set_graphql_schema(instance_id: str, req: GraphQLSchemaRequest):
+    _require_graphql_instance(instance_id)
+    try:
+        return dm.set_graphql_schema(instance_id, req.sdl)
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+
+
+class GraphQLResolverError(BaseModel):
+    message: str
+    extensions: Optional[dict] = None
+
+
+class GraphQLResolverRequest(BaseModel):
+    type: str
+    field: str
+    response_body: object = None
+    error: Optional[GraphQLResolverError] = None
+
+
+@app.get("/api/instances/{instance_id}/graphql/resolvers")
+def get_graphql_resolvers(instance_id: str):
+    _require_graphql_instance(instance_id)
+    return dm.list_graphql_resolvers(instance_id)
+
+
+@app.post("/api/instances/{instance_id}/graphql/resolvers")
+def add_graphql_resolver(instance_id: str, req: GraphQLResolverRequest):
+    _require_graphql_instance(instance_id)
+    try:
+        return dm.set_graphql_resolver(instance_id, req.model_dump())
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.delete("/api/instances/{instance_id}/graphql/resolvers/{type_name}/{field_name}")
+def remove_graphql_resolver(instance_id: str, type_name: str, field_name: str):
+    _require_graphql_instance(instance_id)
+    dm.delete_graphql_resolver(instance_id, type_name, field_name)
     return {"ok": True}
 
 

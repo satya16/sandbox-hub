@@ -20,6 +20,7 @@ class KindDef:
     supports_auth: bool = True
     supports_chaos_config: bool = False
     supports_routes: bool = False
+    supports_graphql_schema: bool = False
     has_own_ui: bool = False
 
 
@@ -49,6 +50,14 @@ KINDS: dict[str, KindDef] = {
             image="satya16dev/sandboxhub-mock-api:latest",
             container_port=8000,
             supports_routes=True,
+        ),
+        KindDef(
+            id="graphql-api",
+            label="GraphQL API",
+            description="Define your own GraphQL schema (SDL) and, per query/mutation field, a templated mock response. Real introspection, real GraphQL errors -- point a codegen tool or GraphiQL at it.",
+            image="satya16dev/sandboxhub-graphql-api:latest",
+            container_port=8000,
+            supports_graphql_schema=True,
         ),
         KindDef(
             id="webhook-receiver",
@@ -85,7 +94,8 @@ OAUTH_PROVIDER_IMAGE = "satya16dev/sandboxhub-oauth-provider:latest"
 OAUTH_PROVIDER_CONTAINER_PORT = 8000
 
 # Shared secret the hub uses to call the private admin endpoints it creates
-# on oauth-provider / chaos-api / mock-api containers. Not meant to protect
-# against anything beyond "don't let the resource's own test traffic hit
-# these by accident" -- everything here binds to 127.0.0.1 anyway.
+# on oauth-provider / chaos-api / mock-api / graphql-api containers. Not
+# meant to protect against anything beyond "don't let the resource's own
+# test traffic hit these by accident" -- everything here binds to
+# 127.0.0.1 anyway.
 ADMIN_TOKEN_DEFAULT = "dev-admin-token"

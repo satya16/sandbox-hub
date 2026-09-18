@@ -15,6 +15,7 @@ services:
       - OAUTH_ADMIN_TOKEN=dev-admin-token
       - CHAOS_ADMIN_TOKEN=dev-admin-token
       - MOCK_ADMIN_TOKEN=dev-admin-token
+      - GRAPHQL_ADMIN_TOKEN=dev-admin-token
     networks:
       - sandboxhub-net
     restart: unless-stopped
@@ -40,6 +41,11 @@ services:
   mock-api-image:
     build: ./resources/mock-api
     image: satya16dev/sandboxhub-mock-api:latest
+    profiles: ["build-only"]
+
+  graphql-api-image:
+    build: ./resources/graphql-api
+    image: satya16dev/sandboxhub-graphql-api:latest
     profiles: ["build-only"]
 
   webhook-receiver-image:

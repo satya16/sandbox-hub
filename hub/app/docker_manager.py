@@ -28,6 +28,7 @@ OAUTH_PROVIDER_NAME = f"{CONTAINER_PREFIX}oauth-provider"
 ADMIN_TOKEN = os.environ.get("OAUTH_ADMIN_TOKEN", "dev-admin-token")
 CHAOS_ADMIN_TOKEN = os.environ.get("CHAOS_ADMIN_TOKEN", "dev-admin-token")
 MOCK_ADMIN_TOKEN = os.environ.get("MOCK_ADMIN_TOKEN", "dev-admin-token")
+GRAPHQL_ADMIN_TOKEN = os.environ.get("GRAPHQL_ADMIN_TOKEN", "dev-admin-token")
 
 LABEL_MANAGED = "sandboxhub.managed"
 LABEL_ROLE = "sandboxhub.role"  # "instance" | "infra"
@@ -234,6 +235,8 @@ def _build_env(kind: str, config: dict) -> dict:
         env["CHAOS_ADMIN_TOKEN"] = CHAOS_ADMIN_TOKEN
     if kind == "mock-api":
         env["MOCK_ADMIN_TOKEN"] = MOCK_ADMIN_TOKEN
+    if kind == "graphql-api":
+        env["GRAPHQL_ADMIN_TOKEN"] = GRAPHQL_ADMIN_TOKEN
 
     return env
 
@@ -396,6 +399,18 @@ def instance_detail(instance_id: str) -> Optional[dict]:
             detail["mock_routes"] = resp.json()
         except httpx.HTTPError:
             detail["mock_routes"] = []
+
+    if kind == "graphql-api":
+        detail["graphiql_url"] = f"{url}/graphiql" if url else None
+        if container.status == "running":
+            try:
+                schema_resp = httpx.get(_instance_internal_url(instance_id, kind, "/_schema"), timeout=3)
+                resolvers_resp = httpx.get(_instance_internal_url(instance_id, kind, "/_resolvers"), timeout=3)
+                detail["graphql_sdl"] = schema_resp.json()["sdl"]
+                detail["graphql_resolvers"] = resolvers_resp.json()
+            except httpx.HTTPError:
+                detail["graphql_sdl"] = None
+                detail["graphql_resolvers"] = []
 
     return detail
 
@@ -581,6 +596,53 @@ def clear_routes(instance_id: str):
         "DELETE",
         _instance_internal_url(instance_id, "mock-api", "/_routes"),
         headers={"X-Admin-Token": MOCK_ADMIN_TOKEN},
+    )
+
+
+# ----------------------------------------------------------------- graphql-api
+
+
+def get_graphql_schema(instance_id: str) -> dict:
+    resp = _request("GET", _instance_internal_url(instance_id, "graphql-api", "/_schema"))
+    return resp.json()
+
+
+def set_graphql_schema(instance_id: str, sdl: str) -> dict:
+    resp = httpx.request(
+        "PUT",
+        _instance_internal_url(instance_id, "graphql-api", "/_schema"),
+        json={"sdl": sdl},
+        headers={"X-Admin-Token": GRAPHQL_ADMIN_TOKEN},
+        timeout=5,
+    )
+    if resp.status_code >= 400:
+        raise ValueError(resp.json().get("detail", resp.text))
+    return resp.json()
+
+
+def list_graphql_resolvers(instance_id: str) -> list[dict]:
+    resp = _request("GET", _instance_internal_url(instance_id, "graphql-api", "/_resolvers"))
+    return resp.json()
+
+
+def set_graphql_resolver(instance_id: str, payload: dict) -> dict:
+    resp = httpx.request(
+        "POST",
+        _instance_internal_url(instance_id, "graphql-api", "/_resolvers"),
+        json=payload,
+        headers={"X-Admin-Token": GRAPHQL_ADMIN_TOKEN},
+        timeout=5,
+    )
+    if resp.status_code >= 400:
+        raise ValueError(resp.json().get("detail", resp.text))
+    return resp.json()
+
+
+def delete_graphql_resolver(instance_id: str, type_name: str, field_name: str):
+    _request(
+        "DELETE",
+        _instance_internal_url(instance_id, "graphql-api", f"/_resolvers/{type_name}/{field_name}"),
+        headers={"X-Admin-Token": GRAPHQL_ADMIN_TOKEN},
     )
 
 
