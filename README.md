@@ -1,11 +1,11 @@
 # sandbox-hub
 
 A local control panel for spinning up disposable test resources -- REST
-APIs, MCP servers, mock endpoints, webhook receivers, a chaos/rate-limit
-sandbox, and a minimal API tester -- as Docker containers, each with its own
-auth setup, from one page. Click **New**, pick what to run and how it
-should be secured, hit **Start**. Run as many at once as you like, in any
-mix of configs.
+APIs, MCP servers, mock REST/GraphQL endpoints, webhook receivers, a
+chaos/rate-limit sandbox, and a minimal API tester -- as Docker containers,
+each with its own auth setup, from one page. Click **New**, pick what to
+run and how it should be secured, hit **Start**. Run as many at once as
+you like, in any mix of configs.
 
 Useful when you're building a client (an app, an agent, an MCP client) and
 need something real to point it at without standing up infrastructure or
@@ -13,7 +13,7 @@ depending on a live third-party service.
 
 ## What it gives you
 
-Six kinds of resource, each configurable per instance:
+Seven kinds of resource, each configurable per instance:
 
 - **REST API** -- a small sample API (`/items`). Also serves its own
   **OpenAPI spec** (`/openapi.json`, version 3.0 or 3.1 -- your choice) plus
@@ -31,6 +31,15 @@ Six kinds of resource, each configurable per instance:
   `{{now}}`, ...). Routes can require certain fields be present in the
   request body (400 if missing), so you can test a client against a schema
   you define instead of a fixed sample one.
+- **GraphQL API** -- same idea as Mock API, but for GraphQL: define your own
+  schema as SDL and, per Query/Mutation field, a templated mock response
+  (`{{request.args.x}}`, `{{request.variables.x}}`, `{{uuid}}`, `{{now}}`,
+  ...). Built on a real `graphql-core` schema instead of name-matching, so
+  introspection and standard GraphQL error shapes work like a genuine
+  endpoint. A resolver can also be set to always raise a GraphQL error
+  instead, for testing a client's error handling. Ships with a small seeded
+  Item/Query/Mutation schema so a fresh instance is queryable immediately,
+  and comes with GraphiQL (`/graphiql`) for poking at it by hand.
 - **Webhook Receiver** -- accepts any request at any path and always
   responds 200. Every payload shows up live in the instance's log stream
   and in a "Received requests" panel on the card -- point a webhook sender
@@ -51,12 +60,13 @@ Six kinds of resource, each configurable per instance:
   URL** (shown on its card) rather than its `localhost:PORT` one -- from
   inside a container, `localhost` means itself, not your machine.
 
-All auth-capable kinds (REST API, MCP server, Mock API, Webhook Receiver)
-support the same auth modes: **none**, **static API key**, **HTTP Basic**,
-a **self-contained JWT** (signed + verified locally with no external calls
--- tests a client's own token handling rather than a lookup), **cookie /
-session login** (`POST /login`, then a cookie gates everything else), and
-**OAuth2** (client_credentials or authorization_code+PKCE against the local
+All auth-capable kinds (REST API, MCP server, Mock API, GraphQL API, Webhook
+Receiver) support the same auth modes: **none**, **static API key**, **HTTP
+Basic**, a **self-contained JWT** (signed + verified locally with no
+external calls -- tests a client's own token handling rather than a
+lookup), **cookie / session login** (`POST /login`, then a cookie gates
+everything else), and **OAuth2** (client_credentials or
+authorization_code+PKCE against the local
 provider, with proper `WWW-Authenticate` challenges and, for MCP, discovery
 via protected-resource metadata).
 
@@ -89,7 +99,7 @@ token/JWT expiry, rate limits, injected failures), not a mock.
   card stays disabled for the whole recreate cycle and only re-enables once
   the instance is confirmed live again.
 - **The resource images** (`resources/rest-api`, `resources/mcp-server`,
-  `resources/mock-api`, `resources/webhook-receiver`,
+  `resources/mock-api`, `resources/graphql-api`, `resources/webhook-receiver`,
   `resources/chaos-api`, `resources/api-tester`, `resources/oauth-provider`)
   are plain, hub-agnostic images. Each is parameterized entirely by env vars
   (`AUTH_MODE`, `OPENAPI_VERSION`, ...) so one image backs every instance of
@@ -127,10 +137,11 @@ docker run -d --name sandboxhub-hub \
 ```
 
 That's the only image you pull yourself. The hub creates every resource
-(`rest-api`, `mcp-server`, `mock-api`, `webhook-receiver`, `chaos-api`,
-`api-tester`, `oauth-provider`) as a sibling container on demand, and Docker
-auto-pulls each one from `satya16dev/sandboxhub-<kind>` the first time you
-actually use that kind -- you never pull the other seven by hand.
+(`rest-api`, `mcp-server`, `mock-api`, `graphql-api`, `webhook-receiver`,
+`chaos-api`, `api-tester`, `oauth-provider`) as a sibling container on
+demand, and Docker auto-pulls each one from `satya16dev/sandboxhub-<kind>`
+the first time you actually use that kind -- you never pull the other eight
+by hand.
 
 Note the Docker socket mount gives the container root-equivalent access to
 your machine -- that's inherent to how the hub creates sibling containers,
