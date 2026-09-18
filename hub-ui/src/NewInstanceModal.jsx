@@ -94,7 +94,7 @@ export default function NewInstanceModal({ open, kinds, authModes, onClose, onCr
             <>
               <Typography variant="body2" color="text.secondary">
                 {kind.description}
-                {(kind.supports_routes || kind.supports_chaos_config) &&
+                {(kind.supports_routes || kind.supports_chaos_config || kind.supports_graphql_schema) &&
                   ' Further settings are configured on the card after you start it.'}
               </Typography>
 

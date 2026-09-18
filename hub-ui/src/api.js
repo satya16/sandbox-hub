@@ -35,6 +35,15 @@ export const createRoute = (id, payload) =>
   request(`/instances/${id}/routes`, { method: 'POST', ...jsonBody(payload) })
 export const deleteRoute = (id, routeId) => request(`/instances/${id}/routes/${routeId}`, { method: 'DELETE' })
 
+export const getGraphqlSchema = (id) => request(`/instances/${id}/graphql/schema`)
+export const setGraphqlSchema = (id, sdl) =>
+  request(`/instances/${id}/graphql/schema`, { method: 'PUT', ...jsonBody({ sdl }) })
+export const listGraphqlResolvers = (id) => request(`/instances/${id}/graphql/resolvers`)
+export const setGraphqlResolver = (id, payload) =>
+  request(`/instances/${id}/graphql/resolvers`, { method: 'POST', ...jsonBody(payload) })
+export const deleteGraphqlResolver = (id, type, field) =>
+  request(`/instances/${id}/graphql/resolvers/${type}/${field}`, { method: 'DELETE' })
+
 export const listWebhookRequests = (id) => request(`/instances/${id}/webhook-requests`)
 export const clearWebhookRequests = (id) => request(`/instances/${id}/webhook-requests`, { method: 'DELETE' })
 

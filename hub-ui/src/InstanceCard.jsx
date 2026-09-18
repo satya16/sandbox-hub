@@ -20,6 +20,8 @@ import {
   ListItem,
   ListItemText,
   Popover,
+  FormControlLabel,
+  Switch,
 } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
@@ -36,6 +38,11 @@ import {
   listRoutes,
   createRoute,
   deleteRoute,
+  getGraphqlSchema,
+  setGraphqlSchema,
+  listGraphqlResolvers,
+  setGraphqlResolver,
+  deleteGraphqlResolver,
   listWebhookRequests,
   clearWebhookRequests,
 } from './api'
@@ -48,12 +55,13 @@ const STATE_COLOR = {
   created: 'warning',
 }
 
-const PATH_SUFFIX = { 'rest-api': '/items', 'mcp-server': '/mcp' }
+const PATH_SUFFIX = { 'rest-api': '/items', 'mcp-server': '/mcp', 'graphql-api': '/graphql' }
 
 const KIND_LABEL = {
   'rest-api': 'REST API',
   'mcp-server': 'MCP Server',
   'mock-api': 'Mock API',
+  'graphql-api': 'GraphQL API',
   'webhook-receiver': 'Webhook Receiver',
   'chaos-api': 'Rate Limit / Chaos API',
   'api-tester': 'API Tester',
@@ -176,27 +184,34 @@ function buildSnippet(instance) {
   const postCmd = (authArgs = '') =>
     kind === 'rest-api' ? `\ncurl ${authArgs}-X POST "${target}?name=myitem"` : ''
 
-  if (auth.mode === 'none') return `curl ${target}${postCmd()}`
+  // graphql-api only ever speaks POST + a JSON body -- a bare GET curl
+  // against /graphql (what every other kind gets) wouldn't work at all.
+  const requestCmd = (authArgs = '') =>
+    kind === 'graphql-api'
+      ? `curl ${authArgs}-X POST ${target} -H "Content-Type: application/json" -d '{"query":"{ items { id name } }"}'`
+      : `curl ${authArgs}${target}`
+
+  if (auth.mode === 'none') return `${requestCmd()}${postCmd()}`
   if (auth.mode === 'apikey') {
     const args = `-H "X-API-Key: ${auth.api_key}" `
-    return `curl ${args}${target}${postCmd(args)}`
+    return `${requestCmd(args)}${postCmd(args)}`
   }
   if (auth.mode === 'basic') {
     const args = `-u ${auth.username}:${auth.password} `
-    return `curl ${args}${target}${postCmd(args)}`
+    return `${requestCmd(args)}${postCmd(args)}`
   }
   if (auth.mode === 'jwt') {
     const args = `-H "Authorization: Bearer ${auth.token}" `
-    return `curl ${args}${target}${postCmd(args)}`
+    return `${requestCmd(args)}${postCmd(args)}`
   }
   if (auth.mode === 'session') {
     const loginCmd = `curl -s -c cookies.txt -X POST ${auth.login_url} \\\n  -H "Content-Type: application/json" -d '{"username":"${auth.username}","password":"${auth.password}"}'`
-    const useCmd = `curl -b cookies.txt ${target}`
+    const useCmd = requestCmd('-b cookies.txt ')
     return `${loginCmd}\n${useCmd}${postCmd('-b cookies.txt ')}`
   }
   if (auth.mode === 'oauth') {
     const tokenCmd = `TOKEN=$(curl -s -X POST ${auth.token_endpoint} \\\n  -d "grant_type=client_credentials&client_id=${auth.client_id}&client_secret=${auth.client_secret}" \\\n  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")`
-    const useCmd = `curl -H "Authorization: Bearer $TOKEN" ${target}`
+    const useCmd = requestCmd('-H "Authorization: Bearer $TOKEN" ')
     return `${tokenCmd}\n${useCmd}${postCmd('-H "Authorization: Bearer $TOKEN" ')}`
   }
   return null
@@ -314,6 +329,18 @@ function OpenApiDetails({ instance }) {
       ) : (
         <Chip size="small" label="spec open" sx={{ mt: 0.5 }} />
       )}
+    </Box>
+  )
+}
+
+function GraphQLDetails({ instance }) {
+  if (instance.kind !== 'graphql-api' || !instance.graphiql_url) return null
+  return (
+    <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid #f0f0f0' }}>
+      <Typography variant="subtitle2">GraphQL</Typography>
+      <Field label="GraphiQL">
+        <Code text={instance.graphiql_url} />
+      </Field>
     </Box>
   )
 }
@@ -587,6 +614,181 @@ function MockRoutesPanel({ instanceId, active, onChanged }) {
   )
 }
 
+function GraphQLPanel({ instanceId, active, onChanged }) {
+  const [sdl, setSdl] = useState('')
+  const [savingSchema, setSavingSchema] = useState(false)
+  const [resolvers, setResolvers] = useState([])
+  const [type, setType] = useState('Query')
+  const [field, setField] = useState('')
+  const [raiseError, setRaiseError] = useState(false)
+  const [responseBody, setResponseBody] = useState('{"ok": true}')
+  const [errorMessage, setErrorMessage] = useState('mocked error')
+  const [busy, setBusy] = useState(false)
+
+  const load = async () => {
+    try {
+      const [schema, resolverList] = await Promise.all([getGraphqlSchema(instanceId), listGraphqlResolvers(instanceId)])
+      setSdl(schema.sdl)
+      setResolvers(resolverList)
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  useEffect(() => {
+    if (active) load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
+
+  const saveSchema = async () => {
+    setSavingSchema(true)
+    try {
+      await setGraphqlSchema(instanceId, sdl)
+      await load()
+      await onChanged()
+      toast.success('schema updated')
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setSavingSchema(false)
+    }
+  }
+
+  const addResolver = async () => {
+    let body = null
+    if (!raiseError) {
+      try {
+        body = JSON.parse(responseBody)
+      } catch {
+        toast.error('response body must be valid JSON')
+        return
+      }
+    }
+    setBusy(true)
+    try {
+      await setGraphqlResolver(instanceId, {
+        type,
+        field,
+        response_body: body,
+        error: raiseError ? { message: errorMessage } : null,
+      })
+      setField('')
+      setResponseBody('{"ok": true}')
+      await load()
+      await onChanged()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (r) => {
+    await deleteGraphqlResolver(instanceId, r.type, r.field)
+    await load()
+    await onChanged()
+  }
+
+  return (
+    <Stack spacing={2}>
+      <Box>
+        <Typography variant="body2" sx={{ mb: 0.5 }}>
+          Schema (SDL)
+        </Typography>
+        <TextField
+          size="small"
+          fullWidth
+          multiline
+          minRows={6}
+          value={sdl}
+          onChange={(e) => setSdl(e.target.value)}
+          sx={{ fontFamily: 'monospace' }}
+        />
+        <Button size="small" variant="outlined" disabled={savingSchema} onClick={saveSchema} sx={{ mt: 1 }}>
+          Save schema
+        </Button>
+      </Box>
+
+      <Box>
+        <Typography variant="body2" sx={{ mb: 0.5 }}>
+          Resolvers (Query/Mutation fields only -- nested fields resolve from whatever the root field returns)
+        </Typography>
+        {resolvers.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            No resolvers yet -- add one below.
+          </Typography>
+        ) : (
+          <List dense disablePadding>
+            {resolvers.map((r) => (
+              <ListItem
+                key={`${r.type}.${r.field}`}
+                disableGutters
+                secondaryAction={
+                  <IconButton size="small" onClick={() => remove(r)}>
+                    <DeleteIcon fontSize="small" color="error" />
+                  </IconButton>
+                }
+              >
+                <ListItemText
+                  primary={
+                    <>
+                      <Box component="code" sx={{ fontFamily: 'monospace', fontSize: 13 }}>
+                        {r.type}.{r.field}
+                      </Box>{' '}
+                      {r.error ? <Chip size="small" color="warning" label="error" /> : null}
+                    </>
+                  }
+                />
+              </ListItem>
+            ))}
+          </List>
+        )}
+
+        <Stack spacing={1.5} sx={{ mt: 1.5 }}>
+          <Stack direction="row" spacing={1} flexWrap="wrap">
+            <Select size="small" value={type} onChange={(e) => setType(e.target.value)} sx={{ minWidth: 110 }}>
+              <MenuItem value="Query">Query</MenuItem>
+              <MenuItem value="Mutation">Mutation</MenuItem>
+            </Select>
+            <TextField size="small" label="Field name" value={field} onChange={(e) => setField(e.target.value)} sx={{ width: 160 }} />
+            <FormControlLabel
+              control={<Switch size="small" checked={raiseError} onChange={(e) => setRaiseError(e.target.checked)} />}
+              label="Raise error"
+            />
+          </Stack>
+          {raiseError ? (
+            <TextField
+              size="small"
+              label="Error message"
+              value={errorMessage}
+              onChange={(e) => setErrorMessage(e.target.value)}
+            />
+          ) : (
+            <TextField
+              size="small"
+              label="Response body (JSON, supports {{request.args.x}}, {{request.variables.x}}, {{uuid}}, {{now}})"
+              multiline
+              minRows={2}
+              value={responseBody}
+              onChange={(e) => setResponseBody(e.target.value)}
+            />
+          )}
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<AddIcon />}
+            disabled={busy || !field}
+            onClick={addResolver}
+            sx={{ alignSelf: 'flex-start' }}
+          >
+            Save resolver
+          </Button>
+        </Stack>
+      </Box>
+    </Stack>
+  )
+}
+
 function WebhookRequestsPanel({ instanceId, active }) {
   const [requests, setRequests] = useState([])
 
@@ -759,6 +961,13 @@ export default function InstanceCard({ instance, kinds, onChanged }) {
       content: <MockRoutesPanel instanceId={instance.id} active={openPanel === 'routes'} onChanged={onChanged} />,
     })
   }
+  if (instance.kind === 'graphql-api') {
+    panels.push({
+      key: 'graphql',
+      label: `Schema & resolvers (${instance.graphql_resolvers?.length ?? 0})`,
+      content: <GraphQLPanel instanceId={instance.id} active={openPanel === 'graphql'} onChanged={onChanged} />,
+    })
+  }
   if (instance.kind === 'webhook-receiver') {
     panels.push({
       key: 'requests',
@@ -811,6 +1020,7 @@ export default function InstanceCard({ instance, kinds, onChanged }) {
               <AuthDetails instance={instance} />
               <OpenApiDetails instance={instance} />
               <AsyncJobDetails instance={instance} />
+              <GraphQLDetails instance={instance} />
             </>
           )}
 
