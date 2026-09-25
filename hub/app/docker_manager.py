@@ -135,6 +135,27 @@ def _instance_internal_url(instance_id: str, kind: str, path: str) -> str:
     return _internal_url(_container_name(instance_id), KINDS[kind].container_port, path)
 
 
+def _admin_request(method: str, url: str, timeout: float = 3.0, **kwargs):
+    """Like _request(), but raises a clean ValueError carrying the
+    resource's own error detail on a 4xx/5xx instead of httpx's generic
+    "Client error '400 Bad Request' for url ...". Callers (the REST API,
+    the MCP tools) surface str(exc) straight to the user or agent, so the
+    actual reason -- e.g. "duplicate path parameter name" -- has to be in
+    it, not just the status code."""
+    deadline = time.time() + timeout
+    while True:
+        try:
+            resp = httpx.request(method, url, timeout=2, **kwargs)
+            break
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            if time.time() >= deadline:
+                raise
+            time.sleep(0.2)
+    if resp.status_code >= 400:
+        raise ValueError(resp.json().get("detail", resp.text))
+    return resp.json() if resp.content else {}
+
+
 def _request(method: str, url: str, timeout: float = 3.0, **kwargs) -> httpx.Response:
     """httpx request with a short retry against connection errors -- calls
     into an instance's own admin endpoints can otherwise race a
@@ -730,13 +751,12 @@ def stream_logs(instance_id: str):
 
 
 def configure_chaos(instance_id: str, payload: dict) -> dict:
-    resp = _request(
+    return _admin_request(
         "PUT",
         _instance_internal_url(instance_id, "chaos-api", "/_config"),
         json=payload,
         headers={"X-Admin-Token": CHAOS_ADMIN_TOKEN},
     )
-    return resp.json()
 
 
 # --------------------------------------------------------------- mock-api routes
@@ -748,17 +768,16 @@ def list_routes(instance_id: str) -> list[dict]:
 
 
 def create_route(instance_id: str, payload: dict) -> dict:
-    resp = _request(
+    return _admin_request(
         "POST",
         _instance_internal_url(instance_id, "mock-api", "/_routes"),
         json=payload,
         headers={"X-Admin-Token": MOCK_ADMIN_TOKEN},
     )
-    return resp.json()
 
 
 def delete_route(instance_id: str, route_id: str):
-    _request(
+    _admin_request(
         "DELETE",
         _instance_internal_url(instance_id, "mock-api", f"/_routes/{route_id}"),
         headers={"X-Admin-Token": MOCK_ADMIN_TOKEN},
@@ -766,7 +785,7 @@ def delete_route(instance_id: str, route_id: str):
 
 
 def clear_routes(instance_id: str):
-    _request(
+    _admin_request(
         "DELETE",
         _instance_internal_url(instance_id, "mock-api", "/_routes"),
         headers={"X-Admin-Token": MOCK_ADMIN_TOKEN},

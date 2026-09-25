@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -9,18 +10,33 @@ from pydantic import BaseModel
 
 from . import docker_manager as dm
 from .catalog import AUTH_MODES, KINDS, OPENAPI_VERSIONS
+from .mcp_server import mcp_app
 
-app = FastAPI(title="sandbox-hub")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    async with AsyncExitStack() as stack:
+        # Idempotent and safe to repeat -- also runs on the first instance
+        # create, but doing it here too means a hub sitting idle still
+        # ends up network-joined (and existing instances' admin calls
+        # start working) without needing a create to trigger it.
+        dm.ensure_network()
+        # mcp_app's routes are spliced into this app below rather than run
+        # directly by uvicorn, so its own lifespan (which starts the
+        # streamable-http session manager) never fires on its own --
+        # nothing about splicing in its routes touches its lifespan.
+        # Entering it here, inside the hub's own lifespan, is what
+        # actually starts it.
+        await stack.enter_async_context(mcp_app.router.lifespan_context(mcp_app))
+        yield
 
 
-@app.on_event("startup")
-def _on_startup():
-    # Idempotent and safe to repeat -- also runs on the first instance
-    # create, but doing it here too means a hub sitting idle still ends up
-    # network-joined (and existing instances' admin calls start working)
-    # without needing a create to trigger it.
-    dm.ensure_network()
-
+app = FastAPI(title="sandbox-hub", lifespan=_lifespan)
+# Splicing mcp_app's own routes straight into the hub's router -- rather
+# than app.mount("/mcp", mcp_app), which would put the actual endpoint at
+# /mcp/mcp (Starlette's Mount-path + the sub-app's own default route path)
+# -- puts it at exactly /mcp, matching what a client is told to connect to.
+app.router.routes.extend(mcp_app.routes)
 
 app.add_middleware(
     CORSMiddleware,
@@ -187,6 +203,8 @@ def set_chaos_config(instance_id: str, req: ChaosConfigRequest):
         raise HTTPException(400, "not a chaos-api instance")
     try:
         return dm.configure_chaos(instance_id, req.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     except Exception as exc:
         raise HTTPException(502, str(exc))
 
@@ -226,6 +244,8 @@ def add_route(instance_id: str, req: MockRouteRequest):
         raise HTTPException(400, "not a mock-api instance")
     try:
         return dm.create_route(instance_id, req.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     except Exception as exc:
         raise HTTPException(502, str(exc))
 
@@ -235,7 +255,12 @@ def remove_route(instance_id: str, route_id: str):
     detail = dm.instance_detail(instance_id)
     if detail is None:
         raise HTTPException(404, "unknown instance")
-    dm.delete_route(instance_id, route_id)
+    try:
+        dm.delete_route(instance_id, route_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, str(exc))
     return {"ok": True}
 
 
@@ -244,7 +269,12 @@ def remove_all_routes(instance_id: str):
     detail = dm.instance_detail(instance_id)
     if detail is None:
         raise HTTPException(404, "unknown instance")
-    dm.clear_routes(instance_id)
+    try:
+        dm.clear_routes(instance_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, str(exc))
     return {"ok": True}
 
 

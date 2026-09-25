@@ -146,6 +146,17 @@ doesn't leave a partial import behind to clean up.
 - **The UI** (`hub-ui/`, React + Material UI) is built at image-build time and
   served directly by the hub, so the whole thing is one container and one
   URL: `http://localhost:8090`.
+- **The hub's own API is a plain, documented HTTP API** -- everything the
+  UI does goes through `/api/*`, and FastAPI serves interactive docs for
+  all of it at `/docs` (Swagger UI) and `/openapi.json`, no separate setup
+  needed. It also runs an **MCP server** (streamable-http, no auth of its
+  own -- same local-control-plane trust level as the rest of the hub) at
+  `/mcp`, exposing the same control plane as MCP tools: create/list/delete
+  instances, rotate credentials, configure Mock API routes (including
+  OpenAPI import) / GraphQL schema and resolvers / Chaos config, and
+  export/import scenarios. Point an MCP client at
+  `http://localhost:8090/mcp` to let an agent provision and reconfigure
+  its own test infrastructure directly, instead of shelling out to curl.
 - All published ports bind to `127.0.0.1` by default (`SANDBOXHUB_BIND_HOST`
   to change) -- these are test/dummy auth servers, not things you want on
   your LAN.
