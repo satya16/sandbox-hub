@@ -101,6 +101,18 @@ Every resource is a real, runnable service -- enough to point a real client
 at and see auth actually enforced (401s, `WWW-Authenticate` challenges,
 token/JWT expiry, rate limits, injected failures), not a mock.
 
+An instance's card can **export** it as a scenario file (kind, auth mode
+and other creation settings, and its live-edited state -- Mock API routes
+including whatever's actually in a CRUD collection right now, not just its
+original seed, GraphQL schema/resolvers, Chaos config) -- and the toolbar
+can export every running instance as one file, or **import** one back,
+recreating each instance fresh from it. A scenario file never contains
+generated secrets (API keys, passwords, JWT secrets, OAuth client
+credentials) -- those are freshly minted on import, same as on any create
+-- so it's meant to be saved, shared, or checked into a repo. An import
+validates the whole file before creating anything, so a mistake in it
+doesn't leave a partial import behind to clean up.
+
 ## Design
 
 - **The hub** (`hub/`, FastAPI + Docker SDK) is the only thing you run
@@ -208,10 +220,6 @@ npm run dev       # http://localhost:5173, proxies /api to the hub on :8090
   you'd integrate with in production.
 - HMAC-signed request auth (Stripe/GitHub-webhook style) as another auth
   mode.
-- Export/import a scenario (an instance's kind, auth config, and
-  live-edited state -- routes, schema, chaos settings) as one JSON file, so
-  a setup can be saved, shared, or checked into a repo instead of rebuilt
-  by hand every time.
 
 ## Security note
 

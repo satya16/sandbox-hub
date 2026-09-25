@@ -15,10 +15,12 @@ import {
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import FileDownloadIcon from '@mui/icons-material/FileDownload'
+import FileUploadIcon from '@mui/icons-material/FileUpload'
 import InstanceCard from './InstanceCard'
 import NewInstanceModal from './NewInstanceModal'
-import { listInstances, getKinds, getOauthProviderStatus } from './api'
-import { setToastListener } from './toast'
+import { listInstances, getKinds, getOauthProviderStatus, exportAllScenario, importScenario, downloadJson } from './api'
+import { setToastListener, toast } from './toast'
 
 function App() {
   const [instances, setInstances] = useState(null)
@@ -28,6 +30,7 @@ function App() {
   const [error, setError] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [toastState, setToastState] = useState({ open: false, severity: 'success', text: '' })
+  const [importing, setImporting] = useState(false)
 
   useEffect(() => {
     setToastListener((severity, text) => setToastState({ open: true, severity, text }))
@@ -54,6 +57,32 @@ function App() {
     return () => clearInterval(interval)
   }, [refresh])
 
+  const exportAll = async () => {
+    try {
+      const scenario = await exportAllScenario()
+      downloadJson('sandboxhub-scenario.json', scenario)
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
+  const importFile = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setImporting(true)
+    try {
+      const scenario = JSON.parse(await file.text())
+      const created = await importScenario(scenario)
+      toast.success(`imported ${created.length} instance${created.length === 1 ? '' : 's'}`)
+      await refresh()
+    } catch (err) {
+      toast.error(err instanceof SyntaxError ? `${file.name} is not valid JSON` : err.message)
+    } finally {
+      setImporting(false)
+    }
+  }
+
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f5f5f5' }}>
       <AppBar position="static" color="default" enableColorOnDark sx={{ bgcolor: '#0a0f1e' }}>
@@ -72,6 +101,30 @@ function App() {
             />
           )}
           <Box sx={{ flexGrow: 1 }} />
+          <Button
+            variant="outlined"
+            startIcon={<FileDownloadIcon />}
+            onClick={exportAll}
+            disabled={!instances?.length}
+            sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.4)' }}
+          >
+            Export all
+          </Button>
+          <Button
+            variant="outlined"
+            component="label"
+            startIcon={<FileUploadIcon />}
+            disabled={importing}
+            sx={{ color: 'white', borderColor: 'rgba(255,255,255,0.4)' }}
+          >
+            Import
+            <input
+              type="file"
+              accept="application/json"
+              hidden
+              onChange={importFile}
+            />
+          </Button>
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setModalOpen(true)}>
             New
           </Button>

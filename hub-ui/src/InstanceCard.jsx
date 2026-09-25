@@ -29,6 +29,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import AddIcon from '@mui/icons-material/Add'
 import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import {
   deleteInstance,
   rotateInstance,
@@ -46,6 +47,8 @@ import {
   deleteGraphqlResolver,
   listWebhookRequests,
   clearWebhookRequests,
+  exportInstanceScenario,
+  downloadJson,
 } from './api'
 import { toast } from './toast'
 
@@ -1114,6 +1117,15 @@ export default function InstanceCard({ instance, kinds, onChanged }) {
     }
   }
 
+  const exportScenario = async () => {
+    try {
+      const scenario = await exportInstanceScenario(instance.id)
+      downloadJson(`sandboxhub-${instance.id}.json`, scenario)
+    } catch (err) {
+      toast.error(err.message)
+    }
+  }
+
   const panels = []
   if (instance.kind === 'chaos-api') {
     panels.push({ key: 'chaos', label: 'Configure', content: <ChaosPanel instance={instance} onChanged={onChanged} /> })
@@ -1146,7 +1158,14 @@ export default function InstanceCard({ instance, kinds, onChanged }) {
       <CardHeader
         title={instance.name}
         titleTypographyProps={{ variant: 'subtitle1', fontWeight: 600 }}
-        action={<DeleteConfirmButton onConfirm={remove} loading={busy} />}
+        action={
+          <Stack direction="row" spacing={0.5}>
+            <IconButton size="small" onClick={exportScenario} title="Export as a scenario file">
+              <FileDownloadIcon fontSize="small" />
+            </IconButton>
+            <DeleteConfirmButton onConfirm={remove} loading={busy} />
+          </Stack>
+        }
       />
       <CardContent sx={{ pt: 0 }}>
         <Stack spacing={1.5}>

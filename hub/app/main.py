@@ -359,6 +359,36 @@ def clear_webhook_requests(instance_id: str):
     return {"ok": True}
 
 
+# ---------------------------------------------------------- scenario export/import
+
+
+@app.get("/api/instances/{instance_id}/scenario")
+def export_instance_scenario(instance_id: str):
+    if dm.instance_detail(instance_id) is None:
+        raise HTTPException(404, "unknown instance")
+    return dm.export_scenario([instance_id])
+
+
+@app.get("/api/scenario")
+def export_all_scenario():
+    return dm.export_scenario()
+
+
+class ScenarioImportRequest(BaseModel):
+    sandboxhub_scenario: Optional[int] = None
+    instances: list[dict] = []
+
+
+@app.post("/api/scenario/import")
+def import_scenario(req: ScenarioImportRequest):
+    try:
+        return dm.import_scenario(req.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok"}

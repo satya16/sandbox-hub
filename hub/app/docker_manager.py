@@ -534,6 +534,81 @@ def _restore_live_state(instance_id: str, kind: str, state: Optional[dict]):
         configure_chaos(instance_id, state["config"])
 
 
+# ------------------------------------------------------- scenario export/import
+#
+# A "scenario" is one instance's kind + creation config + live-configured
+# state, or several such entries together -- everything needed to recreate
+# the setup elsewhere, or after tearing this one down. Deliberately excludes
+# generated secrets (API keys, passwords, JWT secrets, OAuth client
+# credentials): those live in the container's env, not in `config`, and a
+# scenario file is meant to be saved or shared, same spirit as the
+# disposable/ephemeral credentials described in the README's security note.
+# Importing mints fresh ones, exactly as a normal create does.
+
+SCENARIO_FORMAT_VERSION = 1
+
+
+def export_instance(instance_id: str) -> dict:
+    container = _get_container(instance_id)
+    if container is None:
+        raise ValueError(f"instance {instance_id!r} not found")
+    container.reload()
+    kind = container.labels.get(LABEL_KIND)
+    entry = {
+        "kind": kind,
+        "name": container.labels.get(LABEL_NAME, instance_id),
+        "config": json.loads(container.labels.get(LABEL_CONFIG, "{}")),
+    }
+    live_state = _snapshot_live_state(container, instance_id, kind)
+    if live_state is not None:
+        entry["live_state"] = live_state
+    return entry
+
+
+def export_scenario(instance_ids: Optional[list[str]] = None) -> dict:
+    if instance_ids is None:
+        containers = client.containers.list(
+            all=True, filters={"label": [f"{LABEL_MANAGED}=true", f"{LABEL_ROLE}=instance"]}
+        )
+        instance_ids = [c.name.removeprefix(CONTAINER_PREFIX) for c in containers]
+    return {
+        "sandboxhub_scenario": SCENARIO_FORMAT_VERSION,
+        "instances": [export_instance(i) for i in instance_ids],
+    }
+
+
+def import_scenario(scenario: dict) -> list[dict]:
+    if scenario.get("sandboxhub_scenario") != SCENARIO_FORMAT_VERSION:
+        raise ValueError(
+            f"unrecognized scenario format (expected sandboxhub_scenario: {SCENARIO_FORMAT_VERSION})"
+        )
+    entries = scenario.get("instances")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("scenario has no instances to import")
+
+    # Validate every entry before creating anything, so a mistake further
+    # down the file doesn't leave a partial import behind to clean up.
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("each entry in \"instances\" must be an object")
+        kind = entry.get("kind")
+        if kind not in KINDS:
+            raise ValueError(f"unknown kind {kind!r} in scenario")
+        config = entry.get("config") or {}
+        if not isinstance(config, dict):
+            raise ValueError(f"{kind!r} entry's config must be an object")
+        auth_mode = config.get("auth_mode", "none")
+        if KINDS[kind].supports_auth and auth_mode not in AUTH_MODES:
+            raise ValueError(f"unknown auth_mode {auth_mode!r} in scenario")
+
+    created = []
+    for entry in entries:
+        detail = create_instance(entry["kind"], entry.get("name"), dict(entry.get("config") or {}))
+        _restore_live_state(detail["id"], entry["kind"], entry.get("live_state"))
+        created.append(instance_detail(detail["id"]))
+    return created
+
+
 def rotate_instance(instance_id: str) -> dict:
     container = _get_container(instance_id)
     if container is None:

@@ -49,6 +49,24 @@ export const deleteGraphqlResolver = (id, type, field) =>
 export const listWebhookRequests = (id) => request(`/instances/${id}/webhook-requests`)
 export const clearWebhookRequests = (id) => request(`/instances/${id}/webhook-requests`, { method: 'DELETE' })
 
+export const exportInstanceScenario = (id) => request(`/instances/${id}/scenario`)
+export const exportAllScenario = () => request('/scenario')
+export const importScenario = (payload) =>
+  request('/scenario/import', { method: 'POST', ...jsonBody(payload) })
+
+// Triggers a browser "Save file" for JSON data that's already in hand --
+// scenario export responses aren't file downloads on the wire, just JSON,
+// so this is what turns one into a .json file the user actually gets.
+export function downloadJson(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export function logsSocketUrl(id) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   return `${proto}://${window.location.host}${BASE}/instances/${id}/logs/stream`
