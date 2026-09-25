@@ -38,6 +38,7 @@ import {
   listRoutes,
   createRoute,
   deleteRoute,
+  importOpenapiRoutes,
   getGraphqlSchema,
   setGraphqlSchema,
   listGraphqlResolvers,
@@ -476,12 +477,22 @@ function ChaosPanel({ instance, onChanged }) {
 
 function MockRoutesPanel({ instanceId, active, onChanged }) {
   const [routes, setRoutes] = useState([])
+  const [routeType, setRouteType] = useState('static')
   const [method, setMethod] = useState('*')
   const [path, setPath] = useState('*')
   const [statusCode, setStatusCode] = useState(200)
   const [responseBody, setResponseBody] = useState('{"ok": true}')
   const [requiredFields, setRequiredFields] = useState('')
+  const [latencyMs, setLatencyMs] = useState(0)
+  const [failureRate, setFailureRate] = useState(0)
+  const [idField, setIdField] = useState('id')
+  const [seed, setSeed] = useState('[]')
   const [busy, setBusy] = useState(false)
+
+  const [importSpec, setImportSpec] = useState('')
+  const [importUrl, setImportUrl] = useState('')
+  const [importReplace, setImportReplace] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   const load = async () => {
     try {
@@ -497,27 +508,42 @@ function MockRoutesPanel({ instanceId, active, onChanged }) {
   }, [active])
 
   const addRoute = async () => {
-    let body
-    try {
-      body = JSON.parse(responseBody)
-    } catch {
-      toast.error('response body must be valid JSON')
-      return
+    const payload = {
+      type: routeType,
+      method,
+      path,
+      required_fields: requiredFields
+        ? requiredFields.split(',').map((s) => s.trim()).filter(Boolean)
+        : [],
+      latency_ms: latencyMs,
+      failure_rate: failureRate,
+    }
+    if (routeType === 'crud') {
+      try {
+        payload.seed = JSON.parse(seed)
+      } catch {
+        toast.error('seed must be a valid JSON array')
+        return
+      }
+      payload.id_field = idField
+    } else {
+      try {
+        payload.response_body = JSON.parse(responseBody)
+      } catch {
+        toast.error('response body must be valid JSON')
+        return
+      }
+      payload.status_code = statusCode
     }
     setBusy(true)
     try {
-      await createRoute(instanceId, {
-        method,
-        path,
-        status_code: statusCode,
-        response_body: body,
-        required_fields: requiredFields
-          ? requiredFields.split(',').map((s) => s.trim()).filter(Boolean)
-          : [],
-      })
+      await createRoute(instanceId, payload)
       setPath('*')
       setResponseBody('{"ok": true}')
       setRequiredFields('')
+      setLatencyMs(0)
+      setFailureRate(0)
+      setSeed('[]')
       await load()
       await onChanged()
     } catch (err) {
@@ -533,11 +559,37 @@ function MockRoutesPanel({ instanceId, active, onChanged }) {
     await onChanged()
   }
 
+  const runImport = async () => {
+    if (!importSpec.trim() && !importUrl.trim()) {
+      toast.error('paste a spec or give a URL to import from')
+      return
+    }
+    setImporting(true)
+    try {
+      const payload = { replace: importReplace }
+      if (importUrl.trim()) payload.url = importUrl.trim()
+      else payload.spec = importSpec
+      const result = await importOpenapiRoutes(instanceId, payload)
+      const skipped = result.skipped?.length ?? 0
+      toast.success(
+        `imported ${result.created.length} route(s)` + (skipped ? `, skipped ${skipped}` : ''),
+      )
+      setImportSpec('')
+      setImportUrl('')
+      await load()
+      await onChanged()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setImporting(false)
+    }
+  }
+
   return (
     <Box>
       {routes.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
-          No routes yet -- add one below.
+          No routes yet -- add one below, or import an OpenAPI spec.
         </Typography>
       ) : (
         <List dense disablePadding>
@@ -553,12 +605,22 @@ function MockRoutesPanel({ instanceId, active, onChanged }) {
             >
               <ListItemText
                 primary={
-                  <>
+                  <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
                     <Box component="code" sx={{ fontFamily: 'monospace', fontSize: 13 }}>
                       {r.method} {r.path}
-                    </Box>{' '}
-                    <Chip size="small" label={r.status_code} />
-                  </>
+                    </Box>
+                    {r.type === 'crud' ? (
+                      <>
+                        <Chip size="small" color="secondary" label={`crud (${r.items?.length ?? 0} items)`} />
+                      </>
+                    ) : (
+                      <Chip size="small" label={r.status_code} />
+                    )}
+                    {r.latency_ms > 0 && <Chip size="small" variant="outlined" label={`${r.latency_ms}ms`} />}
+                    {r.failure_rate > 0 && (
+                      <Chip size="small" variant="outlined" color="warning" label={`fail ${r.failure_rate}`} />
+                    )}
+                  </Stack>
                 }
               />
             </ListItem>
@@ -568,37 +630,72 @@ function MockRoutesPanel({ instanceId, active, onChanged }) {
 
       <Stack spacing={1.5} sx={{ mt: 1.5 }}>
         <Stack direction="row" spacing={1} flexWrap="wrap">
-          <Select size="small" value={method} onChange={(e) => setMethod(e.target.value)} sx={{ minWidth: 90 }}>
-            {['*', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => (
-              <MenuItem key={m} value={m}>
-                {m}
-              </MenuItem>
-            ))}
+          <Select size="small" value={routeType} onChange={(e) => setRouteType(e.target.value)} sx={{ minWidth: 100 }}>
+            <MenuItem value="static">Static</MenuItem>
+            <MenuItem value="crud">CRUD collection</MenuItem>
           </Select>
+          {routeType === 'static' && (
+            <Select size="small" value={method} onChange={(e) => setMethod(e.target.value)} sx={{ minWidth: 90 }}>
+              {['*', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => (
+                <MenuItem key={m} value={m}>
+                  {m}
+                </MenuItem>
+              ))}
+            </Select>
+          )}
           <TextField
             size="small"
-            label="Path (or *)"
+            label={routeType === 'crud' ? 'Collection path, e.g. /users' : 'Path (or *)'}
             value={path}
             onChange={(e) => setPath(e.target.value)}
-            sx={{ width: 160 }}
+            sx={{ width: 180 }}
           />
+          {routeType === 'static' && (
+            <TextField
+              size="small"
+              label="Status"
+              type="number"
+              value={statusCode}
+              onChange={(e) => setStatusCode(Number(e.target.value))}
+              sx={{ width: 90 }}
+            />
+          )}
+        </Stack>
+
+        {routeType === 'crud' ? (
+          <>
+            <Typography variant="caption" color="text.secondary">
+              Serves GET/POST on the collection and GET/PUT/PATCH/DELETE on {path}/{'{id}'}, starting from this
+              seed. Changes made through requests persist for the life of the instance.
+            </Typography>
+            <Stack direction="row" spacing={1}>
+              <TextField
+                size="small"
+                label="Id field"
+                value={idField}
+                onChange={(e) => setIdField(e.target.value)}
+                sx={{ width: 120 }}
+              />
+            </Stack>
+            <TextField
+              size="small"
+              label="Seed items (JSON array)"
+              multiline
+              minRows={2}
+              value={seed}
+              onChange={(e) => setSeed(e.target.value)}
+            />
+          </>
+        ) : (
           <TextField
             size="small"
-            label="Status"
-            type="number"
-            value={statusCode}
-            onChange={(e) => setStatusCode(Number(e.target.value))}
-            sx={{ width: 90 }}
+            label="Response body (JSON, supports {{request.body.x}}, {{request.params.x}}, {{uuid}}, {{now}})"
+            multiline
+            minRows={2}
+            value={responseBody}
+            onChange={(e) => setResponseBody(e.target.value)}
           />
-        </Stack>
-        <TextField
-          size="small"
-          label="Response body (JSON, supports {{request.body.x}}, {{uuid}}, {{now}})"
-          multiline
-          minRows={2}
-          value={responseBody}
-          onChange={(e) => setResponseBody(e.target.value)}
-        />
+        )}
         <TextField
           size="small"
           label="Required request body fields (comma-separated, optional)"
@@ -606,10 +703,72 @@ function MockRoutesPanel({ instanceId, active, onChanged }) {
           value={requiredFields}
           onChange={(e) => setRequiredFields(e.target.value)}
         />
+        <Stack direction="row" spacing={1}>
+          <TextField
+            size="small"
+            label="Latency (ms)"
+            type="number"
+            value={latencyMs}
+            onChange={(e) => setLatencyMs(Number(e.target.value))}
+            sx={{ width: 120 }}
+          />
+          <TextField
+            size="small"
+            label="Failure rate (0-1)"
+            type="number"
+            inputProps={{ step: 0.05, min: 0, max: 1 }}
+            value={failureRate}
+            onChange={(e) => setFailureRate(Number(e.target.value))}
+            sx={{ width: 140 }}
+          />
+        </Stack>
         <Button size="small" variant="contained" startIcon={<AddIcon />} disabled={busy} onClick={addRoute} sx={{ alignSelf: 'flex-start' }}>
           Add route
         </Button>
       </Stack>
+
+      <Accordion disableGutters variant="outlined" sx={{ mt: 2 }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography variant="body2">Import routes from an OpenAPI spec</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={1.5}>
+            <Typography variant="caption" color="text.secondary">
+              One static route per operation, answering with its documented example or a sample built from its
+              response schema. Give either a spec (JSON or YAML) or a URL to fetch it from.
+            </Typography>
+            <TextField
+              size="small"
+              label="OpenAPI spec (JSON or YAML)"
+              multiline
+              minRows={3}
+              value={importSpec}
+              onChange={(e) => setImportSpec(e.target.value)}
+              disabled={!!importUrl.trim()}
+            />
+            <TextField
+              size="small"
+              label="...or a URL to fetch it from"
+              value={importUrl}
+              onChange={(e) => setImportUrl(e.target.value)}
+              disabled={!!importSpec.trim()}
+            />
+            <FormControlLabel
+              control={<Switch size="small" checked={importReplace} onChange={(e) => setImportReplace(e.target.checked)} />}
+              label="Replace existing routes"
+            />
+            <Button
+              size="small"
+              variant="contained"
+              disabled={importing}
+              onClick={runImport}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              Import
+            </Button>
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
     </Box>
   )
 }

@@ -34,6 +34,8 @@ export const listRoutes = (id) => request(`/instances/${id}/routes`)
 export const createRoute = (id, payload) =>
   request(`/instances/${id}/routes`, { method: 'POST', ...jsonBody(payload) })
 export const deleteRoute = (id, routeId) => request(`/instances/${id}/routes/${routeId}`, { method: 'DELETE' })
+export const importOpenapiRoutes = (id, payload) =>
+  request(`/instances/${id}/routes/import-openapi`, { method: 'POST', ...jsonBody(payload) })
 
 export const getGraphqlSchema = (id) => request(`/instances/${id}/graphql/schema`)
 export const setGraphqlSchema = (id, sdl) =>

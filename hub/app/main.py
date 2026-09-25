@@ -12,6 +12,16 @@ from .catalog import AUTH_MODES, KINDS, OPENAPI_VERSIONS
 
 app = FastAPI(title="sandbox-hub")
 
+
+@app.on_event("startup")
+def _on_startup():
+    # Idempotent and safe to repeat -- also runs on the first instance
+    # create, but doing it here too means a hub sitting idle still ends up
+    # network-joined (and existing instances' admin calls start working)
+    # without needing a create to trigger it.
+    dm.ensure_network()
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -185,11 +195,16 @@ def set_chaos_config(instance_id: str, req: ChaosConfigRequest):
 
 
 class MockRouteRequest(BaseModel):
+    type: str = "static"  # "static" | "crud"
     method: str = "*"
     path: str = "*"
     status_code: int = 200
     response_body: object = {"ok": True}
     required_fields: list[str] = []
+    latency_ms: int = 0
+    failure_rate: float = 0.0
+    seed: list[dict] = []
+    id_field: str = "id"
 
 
 @app.get("/api/instances/{instance_id}/routes")
@@ -231,6 +246,30 @@ def remove_all_routes(instance_id: str):
         raise HTTPException(404, "unknown instance")
     dm.clear_routes(instance_id)
     return {"ok": True}
+
+
+class ImportOpenApiRequest(BaseModel):
+    spec: object = None
+    url: Optional[str] = None
+    headers: dict[str, str] = {}
+    replace: bool = False
+
+
+@app.post("/api/instances/{instance_id}/routes/import-openapi")
+def import_openapi(instance_id: str, req: ImportOpenApiRequest):
+    detail = dm.instance_detail(instance_id)
+    if detail is None:
+        raise HTTPException(404, "unknown instance")
+    if detail["kind"] != "mock-api":
+        raise HTTPException(400, "not a mock-api instance")
+    if (req.spec is None) == (req.url is None):
+        raise HTTPException(400, "give exactly one of spec or url")
+    try:
+        return dm.import_openapi_routes(instance_id, req.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, str(exc))
 
 
 # ----------------------------------------------------------------- graphql-api

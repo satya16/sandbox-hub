@@ -65,11 +65,36 @@ def _port_is_free(port: int) -> bool:
             return False
 
 
+def _self_container():
+    """The hub's own container, identified by hostname -- Docker sets a
+    container's hostname to its own short id unless overridden, and the
+    hub image never overrides it."""
+    try:
+        return client.containers.get(socket.gethostname())
+    except NotFound:
+        return None
+
+
 def ensure_network():
     try:
-        client.networks.get(NETWORK_NAME)
+        network = client.networks.get(NETWORK_NAME)
     except NotFound:
-        client.networks.create(NETWORK_NAME, driver="bridge")
+        network = client.networks.create(NETWORK_NAME, driver="bridge")
+
+    # The hub calls each instance's (and oauth-provider's) admin API by
+    # container name -- mock/graphql/chaos config, OAuth client
+    # registration, the post-create health check -- which only resolves
+    # for containers on the same Docker network. The one-line quickstart
+    # `docker run` for the hub itself has no reason to know this network's
+    # name, so the hub joins itself here instead of requiring --network.
+    # Connecting a running container to a network takes effect immediately,
+    # no restart needed, so this also self-heals a hub already running
+    # without it.
+    self_container = _self_container()
+    if self_container is not None:
+        self_container.reload()
+        if NETWORK_NAME not in self_container.attrs.get("NetworkSettings", {}).get("Networks", {}):
+            network.connect(self_container)
 
 
 def _container_env(container) -> dict[str, str]:
@@ -474,7 +499,14 @@ def _restore_live_state(instance_id: str, kind: str, state: Optional[dict]):
     if kind == "mock-api":
         clear_routes(instance_id)
         for route in state["routes"]:
-            create_route(instance_id, {k: v for k, v in route.items() if k != "id"})
+            payload = {k: v for k, v in route.items() if k not in ("id", "items")}
+            if route["type"] == "crud":
+                # "seed" is only the route's original seed list; a crud
+                # route's actual state is whatever's in its live collection
+                # by now (items added/edited/deleted since creation), so
+                # that's what has to survive the recreate, not the seed.
+                payload["seed"] = route["items"]
+            create_route(instance_id, payload)
     elif kind == "graphql-api":
         set_graphql_schema(instance_id, state["sdl"])
         # The fresh container seeds default resolvers that may not fit the
@@ -664,6 +696,22 @@ def clear_routes(instance_id: str):
         _instance_internal_url(instance_id, "mock-api", "/_routes"),
         headers={"X-Admin-Token": MOCK_ADMIN_TOKEN},
     )
+
+
+def import_openapi_routes(instance_id: str, payload: dict) -> dict:
+    # Not routed through _request() -- that hardcodes a 2s read timeout
+    # (fine for the other admin calls, all local and instant), too short
+    # when the "url" form has the mock-api container fetching a spec over
+    # the network on our behalf.
+    resp = httpx.post(
+        _instance_internal_url(instance_id, "mock-api", "/_routes/import-openapi"),
+        json=payload,
+        headers={"X-Admin-Token": MOCK_ADMIN_TOKEN},
+        timeout=20,
+    )
+    if resp.status_code >= 400:
+        raise ValueError(resp.json().get("detail", resp.text))
+    return resp.json()
 
 
 # ----------------------------------------------------------------- graphql-api

@@ -26,11 +26,25 @@ Seven kinds of resource, each configurable per instance:
   gated by whatever auth mode the instance is using, same as `/items`.
 - **MCP server** (streamable-http) -- `echo` / `add` / `current_time` tools.
 - **Mock API** -- define your own routes after starting it: method + path
-  (or `*` for "any"/catch-all) mapped to a status code and a **templated
-  JSON response** (`{{request.body.x}}`, `{{request.query.x}}`, `{{uuid}}`,
-  `{{now}}`, ...). Routes can require certain fields be present in the
-  request body (400 if missing), so you can test a client against a schema
-  you define instead of a fixed sample one.
+  (or `*` for "any"/catch-all, or a segment like `{id}` for a **path
+  parameter**, readable in templates as `{{request.params.id}}`) mapped to
+  a status code and a **templated JSON response** (`{{request.body.x}}`,
+  `{{request.query.x}}`, `{{request.params.x}}`, `{{uuid}}`, `{{now}}`,
+  ...). Routes can require certain fields be present in the request body
+  (400 if missing), so you can test a client against a schema you define
+  instead of a fixed sample one. Any route can also inject **latency** and
+  a **random failure rate** (a config'd fraction of requests get a random
+  500/502/503/504), same idea as the Chaos API kind but per route. A route
+  can instead be a **CRUD collection** (`/users` -> list/create,
+  `/users/{id}` -> get/replace/merge/delete) backed by an in-memory store
+  you seed when you create it -- real create/update/delete semantics
+  (409 on a duplicate id, 404 on a missing one, auto-assigned ids) instead
+  of a single canned response, for testing a client's full lifecycle
+  against a resource rather than one fixed reply. Routes can also be
+  **generated from an OpenAPI 3.x spec** (paste it, or point at a URL) --
+  one static route per operation, answering with its documented example or
+  a sample built from its response schema, so you can stand up a rough
+  mock of a real API in one step instead of defining every route by hand.
 - **GraphQL API** -- same idea as Mock API, but for GraphQL: define your own
   schema as SDL and, per Query/Mutation field, a templated mock response
   (`{{request.args.x}}`, `{{request.variables.x}}`, `{{uuid}}`, `{{now}}`,
@@ -93,7 +107,12 @@ token/JWT expiry, rate limits, injected failures), not a mock.
   directly. It talks to the Docker Engine API over `/var/run/docker.sock`
   and creates each instance as a sibling container on a dedicated
   `sandboxhub-net` bridge network, live, on a freshly-allocated host port --
-  no compose file regeneration, no fixed port table to run out of. The port
+  no compose file regeneration, no fixed port table to run out of. The hub
+  joins that same network itself on first use (whichever container you
+  started it as -- no `--network` flag needed on the `docker run` in the
+  quickstart below), since it reaches each instance's own admin API
+  (mock/GraphQL/chaos config, OAuth client registration) by container name,
+  which only resolves between containers on the same network. The port
   is also editable per instance after creation (recreates the container on
   the new port, credentials/config untouched -- including live-edited
   Mock API routes, GraphQL schema/resolvers, and Chaos settings, which are
@@ -188,7 +207,11 @@ npm run dev       # http://localhost:5173, proxies /api to the hub on :8090
   minimal OAuth provider, for testing against something closer to what
   you'd integrate with in production.
 - HMAC-signed request auth (Stripe/GitHub-webhook style) as another auth
-  mode, and path-parameter routes (`/users/{id}`) for Mock API.
+  mode.
+- Export/import a scenario (an instance's kind, auth config, and
+  live-edited state -- routes, schema, chaos settings) as one JSON file, so
+  a setup can be saved, shared, or checked into a repo instead of rebuilt
+  by hand every time.
 
 ## Security note
 
