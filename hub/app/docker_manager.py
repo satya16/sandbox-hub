@@ -439,6 +439,69 @@ def remove_instance(instance_id: str):
     _maybe_stop_oauth_provider()
 
 
+# ------------------------------------------------- live-state snapshot/restore
+#
+# Mock API routes, the GraphQL schema/resolvers, and the Chaos API config are
+# set live through each instance's admin API and live only in that
+# container's memory -- they aren't in its env or labels. Anything that
+# recreates the container (rotate, port change) has to carry them across
+# explicitly or they're silently reset to the image defaults.
+
+
+def _snapshot_live_state(container, instance_id: str, kind: str) -> Optional[dict]:
+    """Read the live-configured state out of a running instance. Returns None
+    for kinds with nothing to carry over, or if the container isn't running
+    (its in-memory state is already gone). Raises if a running instance's
+    state can't be read, so the caller fails before tearing anything down."""
+    if container.status != "running":
+        return None
+    if kind == "mock-api":
+        return {"routes": list_routes(instance_id)}
+    if kind == "graphql-api":
+        return {
+            "sdl": get_graphql_schema(instance_id)["sdl"],
+            "resolvers": list_graphql_resolvers(instance_id),
+        }
+    if kind == "chaos-api":
+        resp = _request("GET", _instance_internal_url(instance_id, kind, "/_config"))
+        return {"config": resp.json()}
+    return None
+
+
+def _restore_live_state(instance_id: str, kind: str, state: Optional[dict]):
+    if not state:
+        return
+    if kind == "mock-api":
+        clear_routes(instance_id)
+        for route in state["routes"]:
+            create_route(instance_id, {k: v for k, v in route.items() if k != "id"})
+    elif kind == "graphql-api":
+        set_graphql_schema(instance_id, state["sdl"])
+        # The fresh container seeds default resolvers that may not fit the
+        # restored schema -- replace them wholesale rather than merging.
+        _request(
+            "DELETE",
+            _instance_internal_url(instance_id, kind, "/_resolvers"),
+            headers={"X-Admin-Token": GRAPHQL_ADMIN_TOKEN},
+        )
+        for resolver in state["resolvers"]:
+            try:
+                _request(
+                    "POST",
+                    _instance_internal_url(instance_id, kind, "/_resolvers"),
+                    json=resolver,
+                    headers={"X-Admin-Token": GRAPHQL_ADMIN_TOKEN},
+                )
+            except httpx.HTTPStatusError as exc:
+                # Replacing the schema leaves resolvers for fields it no
+                # longer has in place; they're unreachable, and the fresh
+                # container rightly rejects them (400), so drop them here.
+                if exc.response.status_code != 400:
+                    raise
+    elif kind == "chaos-api":
+        configure_chaos(instance_id, state["config"])
+
+
 def rotate_instance(instance_id: str) -> dict:
     container = _get_container(instance_id)
     if container is None:
@@ -460,6 +523,7 @@ def rotate_instance(instance_id: str) -> dict:
     # baked into the container's env at creation time, so rotating means
     # recreating on the same port.
     port = _host_port(container, KINDS[kind].container_port)
+    live_state = _snapshot_live_state(container, instance_id, kind)
     container.stop(timeout=5)
     container.remove()
 
@@ -482,6 +546,7 @@ def rotate_instance(instance_id: str) -> dict:
         restart_policy={"Name": "unless-stopped"},
     )
     _wait_for_http(_instance_internal_url(instance_id, kind, "/health"))
+    _restore_live_state(instance_id, kind, live_state)
     if auth_mode == "jwt":
         _fetch_jwt_token(instance_id, kind)
     return instance_detail(instance_id)
@@ -512,6 +577,7 @@ def update_port(instance_id: str, new_port: int) -> dict:
         # stale after a port change unless refreshed here.
         env["PUBLIC_URL"] = f"http://localhost:{new_port}"
 
+    live_state = _snapshot_live_state(container, instance_id, kind)
     container.stop(timeout=5)
     container.remove()
 
@@ -532,6 +598,7 @@ def update_port(instance_id: str, new_port: int) -> dict:
         restart_policy={"Name": "unless-stopped"},
     )
     _wait_for_http(_instance_internal_url(instance_id, kind, "/health"))
+    _restore_live_state(instance_id, kind, live_state)
     if config.get("auth_mode") == "jwt":
         _fetch_jwt_token(instance_id, kind)
     return instance_detail(instance_id)

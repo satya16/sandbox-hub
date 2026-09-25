@@ -95,7 +95,10 @@ token/JWT expiry, rate limits, injected failures), not a mock.
   `sandboxhub-net` bridge network, live, on a freshly-allocated host port --
   no compose file regeneration, no fixed port table to run out of. The port
   is also editable per instance after creation (recreates the container on
-  the new port, credentials/config untouched); the Update button on the
+  the new port, credentials/config untouched -- including live-edited
+  Mock API routes, GraphQL schema/resolvers, and Chaos settings, which are
+  carried across the recreate, as they are on "Rotate credentials"); the
+  Update button on the
   card stays disabled for the whole recreate cycle and only re-enables once
   the instance is confirmed live again.
 - **The resource images** (`resources/rest-api`, `resources/mcp-server`,
