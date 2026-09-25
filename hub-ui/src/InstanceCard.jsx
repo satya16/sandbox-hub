@@ -643,10 +643,15 @@ function GraphQLPanel({ instanceId, active, onChanged }) {
   const saveSchema = async () => {
     setSavingSchema(true)
     try {
-      await setGraphqlSchema(instanceId, sdl)
+      const result = await setGraphqlSchema(instanceId, sdl)
       await load()
       await onChanged()
-      toast.success('schema updated')
+      const removed = result.removed_resolvers ?? []
+      toast.success(
+        removed.length
+          ? `schema updated -- removed resolvers for fields no longer in it: ${removed.join(', ')}`
+          : 'schema updated',
+      )
     } catch (err) {
       toast.error(err.message)
     } finally {

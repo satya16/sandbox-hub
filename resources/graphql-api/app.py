@@ -243,7 +243,12 @@ def set_schema(body: SchemaIn, x_admin_token: str | None = Header(default=None))
         raise HTTPException(400, f"invalid SDL: {exc}")
     _state["sdl"] = body.sdl
     _state["schema"] = new_schema
-    return {"sdl": _state["sdl"]}
+    # Drop resolvers for root fields the new schema no longer has -- they
+    # can never be called, and would otherwise linger in the list forever.
+    stale = [key for key, r in resolvers.items() if not _field_exists(r["type"], r["field"])]
+    for key in stale:
+        del resolvers[key]
+    return {"sdl": _state["sdl"], "removed_resolvers": stale}
 
 
 def _root_type_names() -> set[str]:
@@ -257,12 +262,18 @@ def _root_type_names() -> set[str]:
 RESOLVABLE_ROOT_TYPES = {"Query", "Mutation"}
 
 
+def _field_exists(type_name: str, field_name: str) -> bool:
+    if type_name not in _root_type_names() or type_name not in RESOLVABLE_ROOT_TYPES:
+        return False
+    schema_type = _state["schema"].type_map.get(type_name)
+    return schema_type is not None and field_name in getattr(schema_type, "fields", {})
+
+
 def _validate_type_field(type_name: str, field_name: str):
     resolvable = {n for n in _root_type_names() if n in RESOLVABLE_ROOT_TYPES}
     if type_name not in resolvable:
         raise HTTPException(400, f"{type_name!r} is not Query or Mutation in the current schema")
-    schema_type = _state["schema"].type_map.get(type_name)
-    if schema_type is None or field_name not in getattr(schema_type, "fields", {}):
+    if not _field_exists(type_name, field_name):
         raise HTTPException(400, f"no field {type_name}.{field_name} in the current schema")
 
 

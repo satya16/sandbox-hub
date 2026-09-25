@@ -493,9 +493,9 @@ def _restore_live_state(instance_id: str, kind: str, state: Optional[dict]):
                     headers={"X-Admin-Token": GRAPHQL_ADMIN_TOKEN},
                 )
             except httpx.HTTPStatusError as exc:
-                # Replacing the schema leaves resolvers for fields it no
-                # longer has in place; they're unreachable, and the fresh
-                # container rightly rejects them (400), so drop them here.
+                # Older graphql-api images kept resolvers for fields a
+                # schema replacement removed; they're unreachable, and the
+                # fresh container rightly rejects them (400), so drop them.
                 if exc.response.status_code != 400:
                     raise
     elif kind == "chaos-api":
