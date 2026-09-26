@@ -157,6 +157,24 @@ doesn't leave a partial import behind to clean up.
   export/import scenarios. Point an MCP client at
   `http://localhost:8090/mcp` to let an agent provision and reconfigure
   its own test infrastructure directly, instead of shelling out to curl.
+  In Claude Code:
+
+  ```sh
+  claude mcp add --transport http sandbox-hub http://localhost:8090/mcp
+  ```
+
+  or by hand in `.mcp.json`:
+
+  ```json
+  {
+    "mcpServers": {
+      "sandbox-hub": {
+        "type": "http",
+        "url": "http://localhost:8090/mcp"
+      }
+    }
+  }
+  ```
 - All published ports bind to `127.0.0.1` by default (`SANDBOXHUB_BIND_HOST`
   to change) -- these are test/dummy auth servers, not things you want on
   your LAN.
