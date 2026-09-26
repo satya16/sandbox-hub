@@ -1,0 +1,32 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  hub-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The suite drives a real hub container over Docker (see
+      # hub/tests/conftest.py for why), and the hub creates sibling
+      # containers for each resource kind it's asked to spin up. Building
+      # every resource image from source first -- tagged exactly as the
+      # hub's catalog expects (satya16dev/sandboxhub-<kind>:latest) --
+      # means the tests exercise this branch's code, not whatever's
+      # currently published on Docker Hub.
+      - name: Build resource images
+        run: docker compose --profile build-only build
+
+      - name: Install test dependencies
+        run: pip install -r hub/requirements-dev.txt
+
+      - name: Run hub integration tests
+        run: pytest hub/tests/ -v
