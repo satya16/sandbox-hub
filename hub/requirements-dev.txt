@@ -1,0 +1,6 @@
+# For hub/tests/ only -- these drive a real hub container over HTTP (see
+# hub/tests/conftest.py for why), so they need pytest/httpx/docker, not the
+# hub's own runtime deps in requirements.txt.
+pytest==8.3.4
+httpx==0.28.1
+docker==7.1.0
