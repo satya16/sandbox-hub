@@ -100,9 +100,13 @@
         <option>PATCH</option>
         <option>DELETE</option>
       </select>
-      <input type="text" id="url" placeholder="http://sandboxhub-<name>:8000/path" />
+      <input type="text" id="url" placeholder="http://sandboxhub-<name>:8000/path" oninput="checkUrlWarning()" />
       <button id="send-btn" onclick="sendRequest()">Send</button>
     </div>
+    <p id="url-warning" class="fail" style="display: none; margin: -4px 0 10px; font-size: 12px;">
+      ⚠ localhost/127.0.0.1 means <b>this container</b>, not your machine -- nothing here will ever answer on
+      that host. Use the target's <b>Internal URL</b> (shown on its card) instead.
+    </p>
 
     <label>Headers</label>
     <div class="headers-list" id="headers-list"></div>
@@ -183,6 +187,17 @@ function currentRequest() {
     headers: collectHeaders(),
     body: document.getElementById('body').value || null,
   };
+}
+
+function checkUrlWarning() {
+  const raw = document.getElementById('url').value.trim();
+  let isLoopback = false;
+  try {
+    isLoopback = ['localhost', '127.0.0.1', '[::1]'].includes(new URL(raw).hostname);
+  } catch {
+    // not a full URL yet (e.g. still typing) -- nothing to warn about
+  }
+  document.getElementById('url-warning').style.display = isLoopback ? 'block' : 'none';
 }
 
 function statusClass(status) {

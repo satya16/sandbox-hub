@@ -100,12 +100,25 @@ function Code({ text, sx }) {
 }
 
 function Snippet({ text }) {
+  const copy = () => {
+    navigator.clipboard.writeText(text)
+    toast.success('copied')
+  }
   return (
-    <Box
-      component="pre"
-      sx={{ bgcolor: '#f5f5f5', p: 1, borderRadius: 1, overflowX: 'auto', fontSize: 12, m: 0 }}
-    >
-      {text}
+    <Box sx={{ position: 'relative' }}>
+      <Box
+        component="pre"
+        sx={{ bgcolor: '#f5f5f5', p: 1, pr: 4, borderRadius: 1, overflowX: 'auto', fontSize: 12, m: 0 }}
+      >
+        {text}
+      </Box>
+      <IconButton
+        size="small"
+        onClick={copy}
+        sx={{ position: 'absolute', top: 2, right: 2, p: 0.3, bgcolor: 'rgba(245,245,245,0.9)' }}
+      >
+        <ContentCopyIcon sx={{ fontSize: 14 }} />
+      </IconButton>
     </Box>
   )
 }
@@ -1180,7 +1193,11 @@ export default function InstanceCard({ instance, kinds, onChanged }) {
 
           <PortEditor instance={instance} onChanged={onChanged} />
 
-          {instance.internal_url && (
+          {/* Nothing ever targets the API Tester itself by container name --
+              it only ever calls out to other instances -- so its own
+              Internal URL is never useful and, worse, looks like a link a
+              person could open, which it isn't from a browser. */}
+          {instance.internal_url && !hasOwnUi && (
             <Field label="Internal URL (for other sandbox-hub containers, e.g. the API Tester)">
               <Code text={instance.internal_url} />
             </Field>
