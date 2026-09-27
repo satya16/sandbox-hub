@@ -203,9 +203,10 @@ function buildSnippet(instance) {
 
   // graphql-api only ever speaks POST + a JSON body -- a bare GET curl
   // against /graphql (what every other kind gets) wouldn't work at all.
+  const GRAPHQL_QUERY_BODY = '{"query":"{ items { id name } }"}'
   const requestCmd = (authArgs = '') =>
     kind === 'graphql-api'
-      ? `curl ${authArgs}-X POST ${target} -H "Content-Type: application/json" -d '{"query":"{ items { id name } }"}'`
+      ? `curl ${authArgs}-X POST ${target} -H "Content-Type: application/json" -d '${GRAPHQL_QUERY_BODY}'`
       : `curl ${authArgs}${target}`
 
   if (auth.mode === 'none') return `${requestCmd()}${postCmd()}`
@@ -230,6 +231,15 @@ function buildSnippet(instance) {
     const tokenCmd = `TOKEN=$(curl -s -X POST ${auth.token_endpoint} \\\n  -d "grant_type=client_credentials&client_id=${auth.client_id}&client_secret=${auth.client_secret}" \\\n  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")`
     const useCmd = requestCmd('-H "Authorization: Bearer $TOKEN" ')
     return `${tokenCmd}\n${useCmd}${postCmd('-H "Authorization: Bearer $TOKEN" ')}`
+  }
+  if (auth.mode === 'hmac') {
+    // Every example endpoint here sends the same body on every request
+    // (none, or graphql-api's fixed query), so one signature covers both
+    // the read and, where shown, the write example below it.
+    const body = kind === 'graphql-api' ? GRAPHQL_QUERY_BODY : ''
+    const sigCmd = `TS=$(date +%s)\nBODY='${body}'\nSIG=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac '${auth.secret}' -r | cut -d' ' -f1)`
+    const args = `-H "X-Signature: t=$TS,v1=$SIG" `
+    return `${sigCmd}\n${requestCmd(args)}${postCmd(args)}`
   }
   return null
 }
@@ -297,6 +307,19 @@ function AuthDetails({ instance }) {
           </Field>
           <Field label="Client secret">
             <Code text={auth.client_secret} />
+          </Field>
+        </Box>
+      )}
+      {auth.mode === 'hmac' && (
+        <Box sx={{ mb: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            Sign each request yourself: header <code>{auth.header}</code> set to{' '}
+            <code>t=&lt;unix timestamp&gt;,v1=&lt;hex&gt;</code>, where{' '}
+            <code>&lt;hex&gt;</code> is HMAC-SHA256 of <code>"&lt;timestamp&gt;.&lt;raw body&gt;"</code>{' '}
+            keyed with the secret below. Timestamp must be within {auth.tolerance_seconds}s of server time.
+          </Typography>
+          <Field label="Secret">
+            <Code text={auth.secret} />
           </Field>
         </Box>
       )}
@@ -1104,7 +1127,7 @@ export default function InstanceCard({ instance, kinds, onChanged }) {
   const hasOwnUi = kindDef?.has_own_ui
 
   const canRotate =
-    ['apikey', 'basic', 'jwt', 'session', 'oauth'].includes(instance.auth?.mode) || instance.openapi?.protected
+    ['apikey', 'basic', 'jwt', 'session', 'oauth', 'hmac'].includes(instance.auth?.mode) || instance.openapi?.protected
 
   const rotate = async () => {
     setBusy(true)

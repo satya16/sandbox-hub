@@ -14,6 +14,9 @@ AUTH_MODE=session -> POST /login with {username,password} (SESSION_USERNAME/
                      gates /items, /whoami; POST /logout clears it
 AUTH_MODE=oauth   -> those require header  Authorization: Bearer <token>,
                      validated by POSTing to OAUTH_INTROSPECT_URL
+AUTH_MODE=hmac    -> those require header  X-Signature: t=<unix_ts>,v1=<hex>,
+                     where <hex> is hmac_sha256(HMAC_SECRET, f"{ts}.{raw_body}")
+                     hex-encoded; ts must be within 300s of server time
 
 OPENAPI_VERSION=3.0|3.1  -> version declared in the served openapi.json (default 3.1)
 OPENAPI_PROTECT=true     -> /openapi.json, /docs, /redoc require
@@ -26,7 +29,10 @@ ASYNC_JOB_DELAY_SECONDS=N    -> how long a job stays "pending" before it
                                  resolves to "done" (default 5)
 """
 import base64
+import hashlib
+import hmac
 import os
+import re
 import secrets
 import time
 import uuid
@@ -47,6 +53,9 @@ JWT_TTL_SECONDS = int(os.environ.get("JWT_TTL_SECONDS", "86400"))
 SESSION_USERNAME = os.environ.get("SESSION_USERNAME", "")
 SESSION_PASSWORD = os.environ.get("SESSION_PASSWORD", "")
 OAUTH_INTROSPECT_URL = os.environ.get("OAUTH_INTROSPECT_URL", "")
+HMAC_SECRET = os.environ.get("HMAC_SECRET", "")
+HMAC_TOLERANCE_SECONDS = 300
+HMAC_SIGNATURE_RE = re.compile(r"^t=(\d+),v1=([0-9a-f]{64})$")
 
 OPENAPI_VERSION = os.environ.get("OPENAPI_VERSION", "3.1")
 OPENAPI_VERSION_STRING = "3.0.2" if OPENAPI_VERSION.startswith("3.0") else "3.1.0"
@@ -143,6 +152,20 @@ async def require_auth(
         if not data.get("active"):
             raise HTTPException(401, "token is not active")
         return {"mode": "oauth", "client_id": data.get("client_id"), "scope": data.get("scope")}
+
+    if AUTH_MODE == "hmac":
+        sig_header = request.headers.get("x-signature", "")
+        match = HMAC_SIGNATURE_RE.match(sig_header)
+        if not match:
+            raise HTTPException(401, "missing or malformed X-Signature header")
+        ts, sig = match.group(1), match.group(2)
+        if abs(time.time() - int(ts)) > HMAC_TOLERANCE_SECONDS:
+            raise HTTPException(401, "signature timestamp outside tolerance window")
+        body = await request.body()
+        expected = hmac.new(HMAC_SECRET.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            raise HTTPException(401, "invalid signature")
+        return {"mode": "hmac"}
 
     raise HTTPException(500, f"unknown AUTH_MODE={AUTH_MODE}")
 

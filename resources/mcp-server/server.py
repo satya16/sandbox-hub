@@ -14,10 +14,16 @@ AUTH_MODE=session -> POST /login with {username,password} (SESSION_USERNAME/
                      gates the MCP endpoint; POST /logout clears it
 AUTH_MODE=oauth   -> requires header  Authorization: Bearer <token>, verified via
                      OAUTH_INTROSPECT_URL (uses mcp's native TokenVerifier support)
+AUTH_MODE=hmac    -> requires header  X-Signature: t=<unix_ts>,v1=<hex>, where
+                     <hex> is hmac_sha256(HMAC_SECRET, f"{ts}.{raw_body}")
+                     hex-encoded; ts must be within 300s of server time
 """
 import base64
+import hashlib
+import hmac
 import http.cookies
 import os
+import re
 import secrets
 import time
 
@@ -42,6 +48,9 @@ SESSION_PASSWORD = os.environ.get("SESSION_PASSWORD", "")
 OAUTH_INTROSPECT_URL = os.environ.get("OAUTH_INTROSPECT_URL", "")
 OAUTH_ISSUER_URL = os.environ.get("OAUTH_ISSUER_URL", "")
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "http://localhost:8000")
+HMAC_SECRET = os.environ.get("HMAC_SECRET", "")
+HMAC_TOLERANCE_SECONDS = 300
+HMAC_SIGNATURE_RE = re.compile(r"^t=(\d+),v1=([0-9a-f]{64})$")
 
 SESSION_COOKIE = "sandboxhub_session"
 _active_sessions: set[str] = set()
@@ -167,6 +176,20 @@ class AuthMiddleware:
             return
 
         headers = {k.decode(): v.decode() for k, v in scope["headers"]}
+
+        # hmac needs the raw body to verify, which an ASGI receive() channel
+        # only yields once -- buffer it here and hand the inner app a
+        # replacement receive() that replays what was consumed.
+        if AUTH_MODE == "hmac":
+            body, receive = await self._buffer_body(receive)
+            ok, error = self._check_hmac(headers, body)
+            if not ok:
+                response = JSONResponse({"error": error}, status_code=401)
+                await response(scope, receive, send)
+                return
+            await self.inner(scope, receive, send)
+            return
+
         ok, error, challenge = self._check(headers)
         if not ok:
             resp_headers = {"WWW-Authenticate": challenge} if challenge else {}
@@ -174,6 +197,37 @@ class AuthMiddleware:
             await response(scope, receive, send)
             return
         await self.inner(scope, receive, send)
+
+    @staticmethod
+    async def _buffer_body(receive):
+        body = b""
+        messages = []
+        more_body = True
+        while more_body:
+            message = await receive()
+            messages.append(message)
+            body += message.get("body", b"")
+            more_body = message.get("more_body", False)
+
+        async def replay():
+            if messages:
+                return messages.pop(0)
+            return await receive()
+
+        return body, replay
+
+    def _check_hmac(self, headers, body):
+        sig_header = headers.get("x-signature", "")
+        match = HMAC_SIGNATURE_RE.match(sig_header)
+        if not match:
+            return False, "missing or malformed X-Signature header"
+        ts, sig = match.group(1), match.group(2)
+        if abs(time.time() - int(ts)) > HMAC_TOLERANCE_SECONDS:
+            return False, "signature timestamp outside tolerance window"
+        expected = hmac.new(HMAC_SECRET.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            return False, "invalid signature"
+        return True, None
 
     def _check(self, headers):
         if AUTH_MODE == "apikey":
@@ -219,7 +273,7 @@ class AuthMiddleware:
         return True, None, None  # "none" and "oauth" (oauth handled natively by mcp itself)
 
 
-if AUTH_MODE in ("apikey", "basic", "jwt", "session"):
+if AUTH_MODE in ("apikey", "basic", "jwt", "session", "hmac"):
     app = AuthMiddleware(app)
 
 

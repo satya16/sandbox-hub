@@ -276,6 +276,8 @@ def _build_env(kind: str, config: dict) -> dict:
     elif auth_mode == "session":
         env["SESSION_USERNAME"] = "sandbox"
         env["SESSION_PASSWORD"] = secrets.token_urlsafe(12)
+    elif auth_mode == "hmac":
+        env["HMAC_SECRET"] = secrets.token_urlsafe(32)
 
     if kind == "chaos-api":
         env["CHAOS_ADMIN_TOKEN"] = CHAOS_ADMIN_TOKEN
@@ -379,6 +381,13 @@ def _describe_auth(auth_mode: str, instance_id: str, kind: str, env: dict, url: 
         info = {"mode": "oauth", "token_endpoint": f"{provider['url']}/token" if provider["url"] else None}
         info.update(creds)
         return info
+    if auth_mode == "hmac":
+        return {
+            "mode": "hmac",
+            "header": "X-Signature",
+            "secret": env.get("HMAC_SECRET"),
+            "tolerance_seconds": 300,
+        }
     return {"mode": "none"}
 
 
@@ -644,12 +653,12 @@ def rotate_instance(instance_id: str) -> dict:
         _register_oauth_client(instance_id)
         return instance_detail(instance_id)
 
-    if auth_mode not in ("apikey", "basic", "jwt", "session") and not config.get("openapi_protect"):
+    if auth_mode not in ("apikey", "basic", "jwt", "session", "hmac") and not config.get("openapi_protect"):
         raise ValueError("instance has no rotatable credential")
 
-    # apikey/basic/jwt/session secrets (and the openapi-protect token) are
-    # baked into the container's env at creation time, so rotating means
-    # recreating on the same port.
+    # apikey/basic/jwt/session/hmac secrets (and the openapi-protect token)
+    # are baked into the container's env at creation time, so rotating
+    # means recreating on the same port.
     port = _host_port(container, KINDS[kind].container_port)
     live_state = _snapshot_live_state(container, instance_id, kind)
     container.stop(timeout=5)

@@ -87,7 +87,7 @@ KINDS: dict[str, KindDef] = {
     ]
 }
 
-AUTH_MODES = ["none", "apikey", "basic", "jwt", "session", "oauth"]
+AUTH_MODES = ["none", "apikey", "basic", "jwt", "session", "oauth", "hmac"]
 OPENAPI_VERSIONS = ["3.0", "3.1"]
 
 OAUTH_PROVIDER_IMAGE = "satya16dev/sandboxhub-oauth-provider:latest"

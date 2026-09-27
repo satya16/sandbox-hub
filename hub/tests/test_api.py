@@ -6,7 +6,10 @@ GraphQL schema/resolvers, Chaos config, scenario export/import (including
 the no-secrets guarantee), and that live-configured state survives a
 port-change recreate.
 """
+import hashlib
+import hmac
 import socket
+import time
 
 import httpx
 
@@ -33,6 +36,26 @@ def test_create_rest_api_with_apikey(hub):
     key = inst["auth"]["api_key"]
     assert httpx.get(f"{inst['url']}/items", headers={"X-API-Key": key}).status_code == 200
     assert httpx.get(f"{inst['url']}/items").status_code == 401
+
+
+def _hmac_signature(secret: str, ts: int, body: bytes = b"") -> str:
+    digest = hmac.new(secret.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+    return f"t={ts},v1={digest}"
+
+
+def test_hmac_auth(hub):
+    inst = hub.post("/instances", json={"kind": "rest-api", "auth_mode": "hmac"}).json()
+    hub.track(inst["id"])
+    secret = inst["auth"]["secret"]
+    url = f"{inst['url']}/items"
+
+    now = int(time.time())
+    assert httpx.get(url, headers={"X-Signature": _hmac_signature(secret, now)}).status_code == 200
+
+    assert httpx.get(url).status_code == 401
+    assert httpx.get(url, headers={"X-Signature": "not-even-the-right-shape"}).status_code == 401
+    assert httpx.get(url, headers={"X-Signature": _hmac_signature("wrong-secret", now)}).status_code == 401
+    assert httpx.get(url, headers={"X-Signature": _hmac_signature(secret, now - 3600)}).status_code == 401
 
 
 def test_mock_api_static_path_param_and_crud(hub):

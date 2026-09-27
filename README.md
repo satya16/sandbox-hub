@@ -79,10 +79,14 @@ Receiver) support the same auth modes: **none**, **static API key**, **HTTP
 Basic**, a **self-contained JWT** (signed + verified locally with no
 external calls -- tests a client's own token handling rather than a
 lookup), **cookie / session login** (`POST /login`, then a cookie gates
-everything else), and **OAuth2** (client_credentials or
+everything else), **OAuth2** (client_credentials or
 authorization_code+PKCE against the local
 provider, with proper `WWW-Authenticate` challenges and, for MCP, discovery
-via protected-resource metadata).
+via protected-resource metadata), and **HMAC-signed requests** (Stripe/GitHub-
+webhook style -- sign `<timestamp>.<raw body>` with a shared secret and send
+it as `X-Signature: t=<timestamp>,v1=<hex>`; a stale timestamp or bad
+signature gets 401, so this exercises a client's own signing logic rather
+than a static credential).
 
 Nothing is a fixed toggle -- every instance is created with the settings you
 pick in the New Resource dialog, gets its own container and port, and lives
@@ -247,8 +251,6 @@ npm run dev       # http://localhost:5173, proxies /api to the hub on :8090
 - A realistic IdP option (Keycloak and/or Dex) alongside the built-in
   minimal OAuth provider, for testing against something closer to what
   you'd integrate with in production.
-- HMAC-signed request auth (Stripe/GitHub-webhook style) as another auth
-  mode.
 
 ## Security note
 

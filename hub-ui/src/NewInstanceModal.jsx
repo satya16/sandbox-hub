@@ -22,6 +22,7 @@ const AUTH_LABELS = {
   jwt: 'Self-contained JWT',
   session: 'Cookie / session login',
   oauth: 'OAuth2',
+  hmac: 'HMAC-signed request',
 }
 
 const EMPTY_FORM = {

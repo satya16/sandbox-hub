@@ -34,7 +34,7 @@ tool or GraphiQL (served at /graphiql) at it like a real endpoint.
 
 Auth (applies to /graphql only, not /graphiql, /_schema, /_resolvers,
 /health) reuses the same AUTH_MODE options as the other kinds: none, apikey,
-basic, jwt, session, oauth.
+basic, jwt, session, oauth, hmac.
 
 Known simplification: every /graphql response is HTTP 200, with `errors`
 included whenever the query fails to parse, fails validation, or a resolver
@@ -43,6 +43,8 @@ for testing a client's GraphQL-level error handling; not for testing its
 HTTP-level error handling on malformed requests.
 """
 import base64
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -68,6 +70,9 @@ JWT_TTL_SECONDS = int(os.environ.get("JWT_TTL_SECONDS", "86400"))
 SESSION_USERNAME = os.environ.get("SESSION_USERNAME", "")
 SESSION_PASSWORD = os.environ.get("SESSION_PASSWORD", "")
 OAUTH_INTROSPECT_URL = os.environ.get("OAUTH_INTROSPECT_URL", "")
+HMAC_SECRET = os.environ.get("HMAC_SECRET", "")
+HMAC_TOLERANCE_SECONDS = 300
+HMAC_SIGNATURE_RE = re.compile(r"^t=(\d+),v1=([0-9a-f]{64})$")
 ADMIN_TOKEN = os.environ.get("GRAPHQL_ADMIN_TOKEN", "dev-admin-token")
 
 SESSION_COOKIE = "sandboxhub_session"
@@ -190,6 +195,19 @@ async def require_auth(request: Request):
                 raise HTTPException(502, f"could not reach oauth provider: {exc}")
         if not resp.json().get("active"):
             raise HTTPException(401, "token is not active")
+        return
+    if AUTH_MODE == "hmac":
+        sig_header = request.headers.get("x-signature", "")
+        match = HMAC_SIGNATURE_RE.match(sig_header)
+        if not match:
+            raise HTTPException(401, "missing or malformed X-Signature header")
+        ts, sig = match.group(1), match.group(2)
+        if abs(time.time() - int(ts)) > HMAC_TOLERANCE_SECONDS:
+            raise HTTPException(401, "signature timestamp outside tolerance window")
+        body = await request.body()
+        expected = hmac.new(HMAC_SECRET.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            raise HTTPException(401, "invalid signature")
         return
 
 
