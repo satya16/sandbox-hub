@@ -144,6 +144,52 @@ def test_scenario_export_import_roundtrip(hub):
     assert httpx.get(f"{new_inst['url']}/ping").json() == {"ok": True}
 
 
+def test_session_logout_across_kinds(hub):
+    """Regression test: mock-api, graphql-api, and webhook-receiver each
+    used to have no working /logout (mock-api's was reserved-but-unhandled,
+    graphql-api's didn't exist, webhook-receiver's catch-all silently
+    swallowed it without invalidating the session) -- login always worked,
+    logout never did. rest-api is covered implicitly since it's the one
+    kind that already had this right."""
+    cases = [
+        ("mock-api", lambda s: s.get("/t")),
+        ("graphql-api", lambda s: s.post("/graphql", json={"query": "{ items { id } }"})),
+        ("webhook-receiver", lambda s: s.get("/x")),
+    ]
+    for kind, probe in cases:
+        inst = hub.post("/instances", json={"kind": kind, "auth_mode": "session"}).json()
+        hub.track(inst["id"])
+        if kind == "mock-api":
+            hub.post(
+                f"/instances/{inst['id']}/routes",
+                json={"method": "GET", "path": "/t", "response_body": {"ok": True}},
+            )
+        user, pw = inst["auth"]["username"], inst["auth"]["password"]
+
+        s = httpx.Client(base_url=inst["url"])
+        assert s.post("/login", json={"username": user, "password": pw}).status_code == 200
+        assert probe(s).status_code != 401, f"{kind}: should be authenticated after login"
+        assert s.post("/logout").status_code == 200, f"{kind}: /logout should succeed"
+        assert probe(s).status_code == 401, f"{kind}: should be gated again after logout"
+
+
+def test_rest_api_openapi_protect_gates_docs_and_redoc(hub):
+    """Regression test: OPENAPI_PROTECT's own docstring promises it gates
+    /openapi.json, /docs, AND /redoc, but /docs and /redoc used to have no
+    auth dependency wired in at all and were always open."""
+    inst = hub.post(
+        "/instances", json={"kind": "rest-api", "auth_mode": "none", "openapi_protect": True}
+    ).json()
+    hub.track(inst["id"])
+    url = inst["url"]
+    token = inst["openapi"]["auth"]["token"]
+
+    assert httpx.get(f"{url}/docs").status_code == 401
+    assert httpx.get(f"{url}/redoc").status_code == 401
+    assert httpx.get(f"{url}/docs", headers={"X-API-Key": token}).status_code == 200
+    assert httpx.get(f"{url}/redoc", headers={"X-API-Key": token}).status_code == 200
+
+
 def test_state_survives_port_change(hub):
     inst = hub.post("/instances", json={"kind": "mock-api", "auth_mode": "none"}).json()
     hub.track(inst["id"])

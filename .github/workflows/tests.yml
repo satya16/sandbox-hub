@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  hub-tests:
+  hub-integration-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,5 +28,74 @@ jobs:
       - name: Install test dependencies
         run: pip install -r hub/requirements-dev.txt
 
+      # hub/tests/unit runs elsewhere (the hub-unit-tests job below) against
+      # hub/app in-process, with no Docker involved -- excluded here so this
+      # job's minimal dependency set (pytest/httpx/docker, not hub/app's own
+      # fastapi/mcp) doesn't have to satisfy it too.
       - name: Run hub integration tests
-        run: pytest hub/tests/ -v
+        run: pytest hub/tests --ignore=hub/tests/unit -v
+
+  hub-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Unlike hub-integration-tests, this exercises hub/app's own code
+      # in-process (mocked Docker client, FastAPI TestClient) -- no
+      # container, so it needs hub/app's actual runtime deps, not just a
+      # test-driving HTTP client.
+      - name: Install dependencies
+        run: pip install -r hub/requirements.txt -r hub/requirements-dev.txt
+
+      - name: Run hub unit tests
+        run: pytest hub/tests/unit -v
+
+  resource-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Every resource here pins compatible dependency versions (see each
+      # requirements.txt) except mcp-server, which needs a newer starlette
+      # than the others' fastapi pin tolerates -- it gets its own job below
+      # with its own clean venv instead of fighting that in this one.
+      - name: Install dependencies
+        run: |
+          for resource in rest-api mock-api graphql-api chaos-api oauth-provider webhook-receiver api-tester; do
+            pip install -r "resources/$resource/requirements.txt" -r "resources/$resource/requirements-dev.txt"
+          done
+
+      - name: Run resource unit tests
+        run: |
+          pytest \
+            resources/rest-api/tests \
+            resources/mock-api/tests \
+            resources/graphql-api/tests \
+            resources/chaos-api/tests \
+            resources/oauth-provider/tests \
+            resources/webhook-receiver/tests \
+            resources/api-tester/tests \
+            -v
+
+  mcp-server-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r resources/mcp-server/requirements.txt -r resources/mcp-server/requirements-dev.txt
+
+      - name: Run mcp-server unit tests
+        run: pytest resources/mcp-server/tests -v

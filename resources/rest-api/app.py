@@ -271,10 +271,10 @@ async def openapi_json(_auth=Depends(require_openapi_auth)):
 
 
 @app.get("/docs", include_in_schema=False)
-async def swagger_ui():
+async def swagger_ui(_auth=Depends(require_openapi_auth)):
     return get_swagger_ui_html(openapi_url="/openapi.json", title=f"{app.title} - Swagger UI")
 
 
 @app.get("/redoc", include_in_schema=False)
-async def redoc():
+async def redoc(_auth=Depends(require_openapi_auth)):
     return get_redoc_html(openapi_url="/openapi.json", title=f"{app.title} - ReDoc")

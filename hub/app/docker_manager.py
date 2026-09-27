@@ -17,7 +17,7 @@ from typing import Optional
 
 import docker
 import httpx
-from docker.errors import NotFound
+from docker.errors import APIError, NotFound
 
 from .catalog import AUTH_MODES, KINDS, OAUTH_PROVIDER_CONTAINER_PORT, OAUTH_PROVIDER_IMAGE
 
@@ -315,7 +315,6 @@ def create_instance(kind: str, name: Optional[str], config: dict) -> dict:
 
     instance_id = f"{kind}-{secrets.token_hex(3)}"
     env = _build_env(kind, config)
-    port = _free_port()
 
     if auth_mode == "oauth":
         oauth_host_port = _ensure_oauth_provider()
@@ -323,24 +322,45 @@ def create_instance(kind: str, name: Optional[str], config: dict) -> dict:
             OAUTH_PROVIDER_NAME, OAUTH_PROVIDER_CONTAINER_PORT, "/introspect"
         )
         env["OAUTH_ISSUER_URL"] = f"http://localhost:{oauth_host_port}"
-        env["PUBLIC_URL"] = f"http://localhost:{port}"
 
-    client.containers.run(
-        kdef.image,
-        name=_container_name(instance_id),
-        detach=True,
-        network=NETWORK_NAME,
-        ports={f"{kdef.container_port}/tcp": (BIND_HOST, port)},
-        environment=env,
-        labels={
-            LABEL_MANAGED: "true",
-            LABEL_ROLE: "instance",
-            LABEL_KIND: kind,
-            LABEL_NAME: name or instance_id,
-            LABEL_CONFIG: json.dumps(config),
-        },
-        restart_policy={"Name": "unless-stopped"},
-    )
+    labels = {
+        LABEL_MANAGED: "true",
+        LABEL_ROLE: "instance",
+        LABEL_KIND: kind,
+        LABEL_NAME: name or instance_id,
+        LABEL_CONFIG: json.dumps(config),
+    }
+
+    # _free_port() only confirms a port is free *at that instant* -- nothing
+    # reserves it until the container actually binds it, so back-to-back
+    # instance creation can lose a race to another container for the same
+    # port. Retry with a fresh port rather than surfacing a 500 for
+    # something a second attempt would likely resolve; Docker still creates
+    # the container before the bind fails, so that leftover has to be
+    # removed before retrying or it lingers forever in a "created" state.
+    port = _free_port()
+    for attempt in range(3):
+        if auth_mode == "oauth":
+            env["PUBLIC_URL"] = f"http://localhost:{port}"
+        try:
+            client.containers.run(
+                kdef.image,
+                name=_container_name(instance_id),
+                detach=True,
+                network=NETWORK_NAME,
+                ports={f"{kdef.container_port}/tcp": (BIND_HOST, port)},
+                environment=env,
+                labels=labels,
+                restart_policy={"Name": "unless-stopped"},
+            )
+            break
+        except APIError as exc:
+            if attempt == 2 or "port is already allocated" not in str(exc):
+                raise
+            leftover = _get_container(instance_id)
+            if leftover is not None:
+                leftover.remove(force=True)
+            port = _free_port()
 
     # Wait for the container's own app to actually accept connections before
     # returning it as "running" -- callers (the UI, or whoever the instance

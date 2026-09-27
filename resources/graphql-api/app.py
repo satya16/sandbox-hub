@@ -237,6 +237,16 @@ async def login(payload: dict):
     return resp
 
 
+@app.post("/logout", include_in_schema=False)
+async def logout(request: Request):
+    if AUTH_MODE != "session":
+        raise HTTPException(404, "not found")
+    _active_sessions.discard(request.cookies.get(SESSION_COOKIE))
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
+
+
 @app.get("/_debug/token", include_in_schema=False)
 def debug_token():
     if AUTH_MODE != "jwt":
